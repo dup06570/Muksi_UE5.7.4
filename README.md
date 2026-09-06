@@ -69,16 +69,12 @@ Muksi는 무협 세계관을 기반으로 한 턴제 카드 전투 게임입니�
 
 본 프로젝트에서 Battle System과 관련 UI를 중심으로 아래 기능을 직접 개발했습니다.
 
-- `BattleManager` 기반 전체 전투 Phase 흐름 구현
-- 각 Phase를 Entry / UI / Prep / Execution으로 구분하는 `BattlePhasePipeline` 구현
-- `Widget_BattleMainScreen`을 중심으로 한 Battle UI 전체 흐름 구현
+- `BattleManager` 기반 전투 Phase 흐름 구현
+- Entry / UI / Prep / Execution Stage 기반 `BattlePhasePipeline` 구현
+- `Widget_BattleMainScreen`을 중심으로 Battle UI 전체 흐름 구현
 - Hand / Card / Exchange Slot 기반 카드 상호작용 UI 구현
-- Phase에 따른 Battle UI 표시 및 완료 흐름 연동
-- Enemy Card 선택 표시 및 Reveal 연출
-- Exchange Timer 및 시간 초과 UI 처리
-- 카드 Reveal / 변초 카드 공개 / 선·후공 표시 연출
-- Battle Status HUD 및 Passive UI 등 전투 관련 UI 구현
-- Battle System의 호출 흐름 분석 및 클래스별 책임 정리
+- Exchange Timer, Enemy Card Reveal, 선·후공 및 변초 연출 구현
+- Battle System 호출 흐름 분석 및 클래스별 책임 정리
 
 > 팀 프로젝트이므로 아래에서는 제가 직접 개발한 Battle System과 UI를 중심으로 설명합니다.
 
