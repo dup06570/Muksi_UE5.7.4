@@ -36,7 +36,7 @@
 - [Battle Flow](#battle-flow)
 - [주요 구현](#주요-구현)
 - [상세 흐름도](#상세-흐름도)
-- [Battle System 구조](#battle-system-구조)
+- [Battle UI 구조](#battle-ui-구조)
 - [Troubleshooting](#troubleshooting)
 - [개발 회고](#개발-회고)
 
@@ -569,28 +569,23 @@ bool UWidget_BattleMainScreen::PlayDeceiveCardReveal_Implementation(
 
 <br/>
 
-## Battle System 구조
+## Battle UI 구조
 
 ```text
-                        BattleManager
-                             │
-                      BattlePhasePipeline
-                             │
-          ┌──────────────────┼──────────────────┐
-          │                  │                  │
-       Entry               UI Stage          Prep / Execution
-                             │
-                  PhaseUIRequestedDelegate
-                             │
-                  Widget_BattleMainScreen
-                             │
-       ┌─────────────┬───────┼────────┬──────────────┐
-       │             │       │        │              │
-   HandWidget      Slot    Timer   Pipeline UI   Status / Passive UI
-       │             │
- BattleCardWidget  ExchangeSlot
+                Widget_BattleMainScreen
+                           │
+       ┌───────────────────┼───────────────────┐
+       │                   │                   │
+   HandWidget      ExchangeControlWidget   BattlePipelineWidget
+       │                   │
+       │              Widget_BattleTimer
        │
- Card Drag / Select
+ExchangeSlotPanelWidget
+       │
+ ┌─────┴─────┐
+ │           │
+BattleCard  CardEquipSlot
+Widget
 ```
 
 `Widget_BattleMainScreen`은 Battle UI의 중심에서
