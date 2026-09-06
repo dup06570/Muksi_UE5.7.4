@@ -567,7 +567,7 @@ bool UWidget_BattleMainScreen::PlayDeceiveCardReveal_Implementation(
 <br/>
 > Battle System의 책임과 호출 흐름을 팀원과 공유하기 위해
 > 실제 코드를 따라가며 Figma에 함수 단위로 정리했습니다.
-[🔗 Figma에서 확대하여 상세 흐름 보기](Figma 링크)
+[🔗 Figma에서 확대하여 상세 흐름 보기]([Figma 링크](https://www.figma.com/design/Utn3iyOoFEurf0v8SsA6QL/Muksi_Portfolio_BattleFlow?node-id=0-1&t=3MlWFX3hYDkjfRXZ-1))
 
 <br/>
 
