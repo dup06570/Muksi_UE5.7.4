@@ -562,6 +562,7 @@ bool UWidget_BattleMainScreen::PlayDeceiveCardReveal_Implementation(
        alt="CardSelect PhaseUIRequested Stage Flow"
        width="100%"/>
 </p>
+
 > `Widget_BattleMainScreen`을 시작점으로 Hand, Exchange Slot,  
 > Timer, Card 및 Targeting 관련 시스템으로 호출이 어떻게 이어지는지 정리한 흐름도입니다.
 >
