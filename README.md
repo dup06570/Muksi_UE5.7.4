@@ -59,7 +59,7 @@ Muksi는 무협 세계관을 기반으로 한 턴제 카드 전투 게임입니�
 | 언어 | C++ |
 | 개발 형태 | Team Project |
 | 담당 영역 | Battle System / Battle UI |
-| 개발 기간 | YYYY.MM ~ 진행 중 |
+| 개발 기간 | 2026.02 ~ 진행 중 |
 
 <br/>
 
