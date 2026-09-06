@@ -15,17 +15,18 @@
 
 > Battle System 시연
 
-<!-- 시연 영상이 준비되면 추가 -->
-<!--
-[![Muksi Battle 시연영상](Youtube Thumbnail URL)](Youtube URL)
--->
-
-<!-- 또는 대표 전투 화면 추가 -->
-<!--
 <p align="center">
-    <img src="./page_image/Battle.png" width="750"/>
+  <a href="https://youtu.be/MkjXmvktnE0">
+    <img src="https://img.youtube.com/vi/MkjXmvktnE0/0.jpg"
+         alt="Muksi Battle 시연영상"
+         width="700"/>
+  </a>
 </p>
--->
+
+> Battle 시작부터 한 Round가 종료될 때까지의 전투 흐름을 시연한 영상입니다. 
+
+> 한 Round는 3회의 Exchange를 진행하며, 각 Exchange에서 선택한 카드를 기반으로
+> 최종적으로 3개의 Battle Action이 순차적으로 실행됩니다.
 
 <br/>
 
