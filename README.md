@@ -558,15 +558,13 @@ bool UWidget_BattleMainScreen::PlayDeceiveCardReveal_Implementation(
 **CardSelect Phase의 `PhaseUIRequested_Stage`**를 함수 단위로 정리한 자료입니다.
 
 <p align="center">
-  <img
-    src="./page_image/CardSelect_PhaseUIRequested.png"
-    alt="CardSelect PhaseUIRequested Stage Flow"
-    width="950"
-  />
+  <img src="./page_image/CardSelect_PhaseUIRequested.png"
+       alt="CardSelect PhaseUIRequested Stage Flow"
+       width="100%"/>
 </p>
 > `Widget_BattleMainScreen`을 시작점으로 Hand, Exchange Slot,
 > Timer, Card 및 Targeting 관련 시스템으로 호출이 어떻게 이어지는지 정리한 흐름도입니다.
-
+<br/>
 > Battle System의 책임과 호출 흐름을 팀원과 공유하기 위해
 > 실제 코드를 따라가며 Figma에 함수 단위로 정리했습니다.
 [🔗 Figma에서 확대하여 상세 흐름 보기](Figma 링크)
