@@ -6,7 +6,9 @@
     <img src="https://img.shields.io/badge/C++-00599C?style=for-the-badge&logo=cplusplus&logoColor=white">
 </p>
 
-> 본 Repository는 포트폴리오 제출을 위해 실제 팀 프로젝트 Repository를 Fork한 저장소입니다.  
+> 포트폴리오 제출을 위해 Source Code 중심으로 구성했으며,
+> 외부 Asset 및 리소스는 Repository에서 제외했습니다.
+> 
 > Muksi는 현재 개발 진행 중인 프로젝트이며, 본 README에서는 제가 주로 담당하고 현재 구현이 완료된 **Battle System**을 중심으로 소개합니다.
 
 <br/>
