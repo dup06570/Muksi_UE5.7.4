@@ -997,6 +997,21 @@ Actor와 UI의 연출 시간이 달라도,
 각 행동의 소개 연출을 먼저 진행한 뒤 실제 행동 실행으로 연결하여,
 연출 순서 제어와 전투 행동 실행의 책임을 분리했습니다.
 
+#### 결과
+
+<p align="center">
+  <img src="./page_image/카메라제어_1.gif"
+       alt="Card Select 단계 카메라 제어"
+       width="800"/>
+</p>
+
+<p align="center">
+  <img src="./page_image/카메라제어_2.gif"
+       alt="BattleAction 단계 카메라 제어"
+       width="800"/>
+</p>
+
+
 #### 관련 코드
 
 - `Source/Muksi/Contents/Battle/Camera/BattleCameraManager.cpp`
