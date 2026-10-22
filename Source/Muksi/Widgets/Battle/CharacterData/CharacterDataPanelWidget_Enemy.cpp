@@ -3,57 +3,36 @@
 
 #include "Muksi/Widgets/Battle/CharacterData/CharacterDataPanelWidget_Enemy.h"
 
-#include "CommonAnimatedSwitcher.h"
-#include "Widget_CharacterDeckPanel.h"
-#include "Components/Button.h"
-#include "Controllers/MuksiPlayerController.h"
-#include "Muksi/Contents/Battle/Character/BattleCharacter_Enemy.h"
-#include "Muksi/Widgets/Battle/Passive/Widget_CharacterPassivePanel.h"
-#include "Muksi/Contents/MuksiWorldManagerSubsystem.h"
-#include "Muksi/Contents/Battle/BattleManager.h"
-#include "Muksi/Contents/Battle/Character/BattleCardComponent.h"
-#include "Muksi/Contents/Battle/Runtime/BattleRuntimeContext.h"
-#include "Player/Widget_PlayerProfilePanel.h"
 
 
-void UCharacterDataPanelWidget_Enemy::InitializeFromPlayerMode()
-{
-	AMuksiPlayerController* MuksiPC = Cast<AMuksiPlayerController>(GetOwningPlayer());
-	if (!MuksiPC)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("CharacterDataPanelWidget_Enemy - MuksiPC is null"));
-		return;
-	}
 
-	UPlayerMode_Battle* PlayerMode = MuksiPC->GetPlayerMode();
-	if (!PlayerMode)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("CharacterDataPanelWidget_Enemy - PlayerMode is null"));
-		return;
-	}
 
-	UMuksiWorldManagerSubsystem* ManagerSubsystem = UMuksiWorldManagerSubsystem::Get(this);
-	ABattleManager* BattleManager = ManagerSubsystem
-		? ManagerSubsystem->GetManager<ABattleManager>()
-		: nullptr;
-	UBattleRuntimeContext* BattleRuntimeContext = BattleManager
-		? BattleManager->GetBattleRuntimeContext()
-		: nullptr;
 
-	ApplyCharacterData(BattleRuntimeContext ? BattleRuntimeContext->GetEnemyCharacter() : nullptr);
-}
+/*
 
 void UCharacterDataPanelWidget_Enemy::ApplyCharacterData(ABattleCharacter_Enemy* PlayerData)
 {
 	if (!PlayerData)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("CharacterDataPanelWidget_Player - InCharacterData is null"));
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("CharacterDataPanelWidget_Enemy - PlayerData is null")
+		);
 		return;
 	}
+
 	EnemyProfilePanelWidget->SetBattleCharacter(PlayerData);
 	EnemyProfilePanelWidget->SetData(PlayerData->GetCharacterData());
-	UBattleCardComponent* CardComponent = PlayerData->GetBattleCardComponent();
-	CharacterDeckPanelWidget->SetDeckData(CardComponent->GetFullDeck());
+
+	UBattleSkillComponent* SkillComponent =
+		PlayerData->GetBattleSkillComponent();
+
+	if (SkillComponent)
+	{
+		CharacterDeckPanelWidget->SetDeckData(SkillComponent->GetSkillDataList());
+	}
+
 	CharacterPassivePanelWidget->SetPassiveData(PlayerData->GetCharacterPassives());
 }
 
@@ -123,4 +102,4 @@ void UCharacterDataPanelWidget_Enemy::SwitchEnemyPanel(int32 PanelIndex)
 
 	WidgetSwitcher->SetActiveWidgetIndex(PanelIndex);
 	
-}
+}*/

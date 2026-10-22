@@ -4,6 +4,7 @@
 #include "Muksi/Contents/Battle/Character/BattleCharacterBase.h"
 
 #include "BattleCardComponent.h"
+#include "BattleSkillComponent.h"
 #include "BattleStatComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -12,6 +13,7 @@
 #include "Muksi/Contents/Battle/Animations/MuksiBattleAnimationComponent.h"
 #include "Muksi/Contents/Battle/Camera/CharacterCameraComponent.h"
 #include "Muksi/Contents/Battle/Movement/MuksiBattleMovementComponent.h"
+#include "Muksi/Contents/Battle/FX/MuksiBattleFXComponent.h"
 #include "Muksi/Contents/Battle/Passive/CharacterPassiveComponent.h"
 
 
@@ -60,9 +62,17 @@ ABattleCharacterBase::ABattleCharacterBase()
 		ECR_Ignore
 	);
 	
+	//스킬 위젯 액터 소환 위치
+	SkillInfoAnchorComponent = CreateDefaultSubobject<USceneComponent>(TEXT("SkillInfoAnchorComponent"));
+	SkillInfoAnchorComponent->SetupAttachment(RootComponent);
 	//카메라 포커스 잡는 컴포넌트는 소켓에 잡기(클릭 확대용)
 	ClickCameraFocusComponent = CreateDefaultSubobject<UCharacterCameraComponent>(TEXT("ClickCameraFocusComponent"));
 	ClickCameraFocusComponent->SetupAttachment(SceneRoot);
+	ClickCameraFocusComponent->SetRelativeLocation(FVector(-40.0f, 150.0f, 160.0f));
+	//BattleAction 직전 카메라 포커스
+	ActionCameraFocusComponent = CreateDefaultSubobject<UCharacterCameraComponent>(TEXT("ActionCameraFocusComponent"));
+	ActionCameraFocusComponent->SetupAttachment(RootComponent);
+	ActionCameraFocusComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 168.0f));
 	//카메라 포커스 잡는 컴포넌트는 소켓에 잡기(공격 애니메이션 연출용)
 	AttackCameraFocusComponent = CreateDefaultSubobject<UCharacterCameraComponent>(TEXT("AttackCameraFocusComponent"));
 	AttackCameraFocusComponent->SetupAttachment(MeshComponent,TEXT("AttackCameraSocket"));
@@ -74,11 +84,45 @@ ABattleCharacterBase::ABattleCharacterBase()
 
 	BattleAnimationComponent = CreateDefaultSubobject<UMuksiBattleAnimationComponent>(TEXT("BattleAnimationComponent"));
 
-	BattleMovementComponent =CreateDefaultSubobject<UMuksiBattleMovementComponent>(TEXT("BattleMovementComponent"));
-	
-	BattleStatComponent = CreateDefaultSubobject<UBattleStatComponent>(TEXT("BattleStatComponent"));
+	BattleMovementComponent = CreateDefaultSubobject<UMuksiBattleMovementComponent>(TEXT("BattleMovementComponent"));
 
-	BattleCardComponent = CreateDefaultSubobject<UBattleCardComponent>(TEXT("BattleCardComponent"));
+	BattleFXComponent = CreateDefaultSubobject<UMuksiBattleFXComponent>(TEXT("BattleFXComponent"));
+
+	BattleStatComponent = CreateDefaultSubobject<UBattleStatComponent>(TEXT("BattleStatComponent"));
+	
+	BattleSkillComponent = CreateDefaultSubobject<UBattleSkillComponent>(TEXT("BattleSkillComponent"));
+}
+
+void ABattleCharacterBase::InitializeCharacter(const FBattleCharacterInitData& InitData, ABattleManager* BattleManager)
+{
+	if (!BattleManager ||
+		!BattleStatComponent ||
+		!BattleSkillComponent ||
+		!PassiveComponent ||
+		!StatusEffectComponent)
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[BattleCharacterBase] Initialization dependency is missing."));
+		return;
+	}
+	
+	// 캐릭터 자체에서 보관할 정보.
+	CharacterInfo = InitData.CharacterInfo;
+	TimeoutPenalties = InitData.TimeoutPenalties;
+
+	StatusEffectComponent->Initialize(BattleManager);
+
+	// 전투 능력치와 시작 HP.
+	BattleStatComponent->InitializeStats(InitData.Stats);
+	BattleStatComponent->SetCurrentHP(InitData.CurrentHP);
+
+	// 스킬과 코스트.
+	BattleSkillComponent->Initialize(InitData.Skills, InitData.MaxSkillCost);
+
+	// 패시브.
+	PassiveComponent->InitializePassives(InitData.PassiveClasses);
 }
 
 
@@ -95,68 +139,65 @@ void ABattleCharacterBase::SetCurrentHP(float NewHP)
 
 FVector2D ABattleCharacterBase::GetCurrentSelectCardTime() const
 {
-	if (CharacterData.IsValid()){return FVector2D(CharacterData.CharacterAsset->CardSelectTimeMin, CharacterData.CharacterAsset->CardSelectTimeMax);}
-	return FVector2D(1.f,1.f);
+	if (!BattleStatComponent)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BattleCharacterBase] BattleStatComponent is null"));
+		return FVector2D(1.f,1.f);
+	}
+	return BattleStatComponent->GetSelectSpeed();
 }
 
 
 float ABattleCharacterBase::GetCharacterSpeed() const
 {
-	return CharacterData.CharacterSpeed;
+	if (!BattleStatComponent)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[BattleCharacterBase]BattleStatComponent is null"));
+		return -1.f;
+	}
+	return BattleStatComponent->GetSpeed();;
 }
 
 void ABattleCharacterBase::SetCharacterData(UMuksiCharacterDataAsset* InCharacterData, ABattleManager* BattleManager)
 {
-	CharacterData.Init_DataAsset(InCharacterData);
+	/*CharacterData.Init_DataAsset(InCharacterData);
 	if (!CharacterData.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("BattleCharacterBase SetCharacterData failed: CharacterDataAsset is null"));
 		return;
-	}
+	}*/
 	
-	if (!PassiveComponent)
+	if (!IsValid(InCharacterData))
 	{
-		UE_LOG(LogTemp, Error, TEXT("PassiveComponent is null (BattleCharacterBase.cpp)"));
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT("[BattleCharacterBase] Character DataAsset is invalid."));
 		return;
 	}
-	StatusEffectComponent->Initialize(BattleManager);
-	PassiveComponent->InitializePassives(CharacterData.CharacterPassives);
-	
-	InitializeBattleStats();
-	
-	if (!BattleCardComponent)
-	{
-		UE_LOG(LogTemp, Error, TEXT("BattleCardComponent is null (BattleCharacterBase.cpp)"));
-		return;
-	}
-	BattleCardComponent->Initialize(InCharacterData->CharacterDeck);
+	InitializeCharacter(InCharacterData->MakeBattleInitData(), BattleManager);
 }
 
-void ABattleCharacterBase::InitializeBattleStats()
-{
-	if (!BattleStatComponent)
-	{
-		UE_LOG(LogTemp, Error, TEXT("BattleStatComponent is null (BattleCharacterBase.cpp)"));
-		return;
-	}
-	FBattleStats BattleStats = FBattleStats();
-	BattleStats.Attack = CharacterData.AttackValue;
-	BattleStats.Defense = CharacterData.DefenseValue;
-	BattleStats.Speed = CharacterData.CharacterSpeed;
-	BattleStats.HP = CharacterData.MaxHP;
-	BattleStatComponent->InitializeStats(BattleStats);
-}
+
 
 void ABattleCharacterBase::CopySimulationStateFrom(const ABattleCharacterBase& SourceCharacter)
 {
-	CharacterData = FCharacterData();
+	/*CharacterData = FCharacterData();
 	CharacterData.CurrentPosition = SourceCharacter.CharacterData.CurrentPosition;
 	CharacterData.CharacterAsset = SourceCharacter.CharacterData.CharacterAsset;
 	CharacterData.MaxHP = SourceCharacter.CharacterData.MaxHP;
 	CharacterData.AttackValue = SourceCharacter.CharacterData.AttackValue;
 	CharacterData.DefenseValue = SourceCharacter.CharacterData.DefenseValue;
-	CharacterData.CharacterSpeed = SourceCharacter.CharacterData.CharacterSpeed;
-	if (BattleStatComponent && SourceCharacter.BattleStatComponent) BattleStatComponent->CopyRuntimeStateFrom(*SourceCharacter.BattleStatComponent);
+	CharacterData.CharacterSpeed = SourceCharacter.CharacterData.CharacterSpeed;*/
+	
+	CharacterInfo = SourceCharacter.CharacterInfo;
+	CurrentPosition = SourceCharacter.CurrentPosition;
+	TimeoutPenalties = SourceCharacter.TimeoutPenalties;
+
+	if (BattleStatComponent && SourceCharacter.BattleStatComponent)
+	{
+		BattleStatComponent->CopyRuntimeStateFrom(*SourceCharacter.BattleStatComponent);
+	}
 }
 
 void ABattleCharacterBase::HandleClicked(UPrimitiveComponent* TouchedComponent, FKey ButtonPressed)
@@ -166,18 +207,6 @@ void ABattleCharacterBase::HandleClicked(UPrimitiveComponent* TouchedComponent, 
 		*ButtonPressed.ToString());
 }
 
-
-
-int32 ABattleCharacterBase::GetCurrentBattleCardCount() const
-{
-	//return CharacterData.BattleDeck.Num();기존 코드
-	if (!BattleCardComponent)
-	{
-		return 0;
-	}
-
-	return BattleCardComponent->GetCurrentHandCount();
-}
 
 TArray<TObjectPtr<UCharacterPassive>> ABattleCharacterBase::GetCharacterPassives()
 {

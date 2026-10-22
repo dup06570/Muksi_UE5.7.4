@@ -10,16 +10,17 @@
 #include "Muksi/Contents/Battle/Flow/BattlePhaseTask.h"
 #include "Muksi/Contents/Battle/Runtime/BattleRuntimeContext.h"
 #include "Muksi/Contents/Battle/Simulation/Character/BattleSimulationCharacter.h"
-#include "Muksi/Contents/Battle/Simulation/PostProcess/BattleSimulationPostProcessVolume.h"
 #include "Muksi/Contents/Battle/Simulation/Presentation/BattleSimulationPresentationController.h"
+#include "Muksi/Contents/Battle/Simulation/Presentation/BattleDDPresentationActor.h"
 #include "Muksi/Contents/Battle/Simulation/World/BattleSimulationWorldRuntime.h"
 #include "Muksi/Contents/Battle/Targeting/BattleTargetingManager.h"
 
 ABattleSimulationManager::ABattleSimulationManager()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	SimulationPostProcessVolumeClass = ABattleSimulationPostProcessVolume::StaticClass();
+	DDPresentationActorClass = ABattleDDPresentationActor::StaticClass();
 }
+
 
 void ABattleSimulationManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
@@ -51,7 +52,7 @@ bool ABattleSimulationManager::InitializeBattleFlow(ABattleManager* InBattleMana
 
 EBattleSimulationState ABattleSimulationManager::GetSimulationState() const
 {
-	UBattleSimulationWorldRuntime* WorldRuntime = PresentationController ? PresentationController->GetPlayerPresentationWorldRuntime() : nullptr;
+	UBattleSimulationWorldRuntime* WorldRuntime = GetSimulationWorldRuntime(EBattleSimulationWorldType::PlayerActualEnemyDeceived);
 	return IsValid(WorldRuntime) ? WorldRuntime->GetSimulationState() : EBattleSimulationState::Idle;
 }
 
@@ -177,17 +178,20 @@ bool ABattleSimulationManager::IsManagedSimulationRuntime(const UBattleSimulatio
 
 void ABattleSimulationManager::RefreshSimulationWorldTimeScales()
 {
-	UBattleSimulationWorldRuntime* VisibleWorldRuntime = PresentationController ? PresentationController->GetPlayerPresentationWorldRuntime() : nullptr;
 	const bool bCanFastForward = CompletionTrackingExchangeIndex != INDEX_NONE && !IsCurrentExchangeCompletionTrackingComplete();
-	const bool bVisibleWorldCompleted = IsValid(VisibleWorldRuntime) && CompletedWorldTypesForCurrentExchange.Contains(VisibleWorldRuntime->GetWorldType());
+	const bool bADCompleted = CompletedWorldTypesForCurrentExchange.Contains(EBattleSimulationWorldType::PlayerActualEnemyDeceived);
+	const bool bDDCompleted = CompletedWorldTypesForCurrentExchange.Contains(EBattleSimulationWorldType::PlayerDeceivedEnemyDeceived);
+	const bool bPresentationWorldsCompleted = bADCompleted && bDDCompleted;
 	bool bAnyWorldFastForwarding = false;
 
 	for (UBattleSimulationWorldRuntime* WorldRuntime : GetSimulationWorldRuntimes())
 	{
 		if (!IsValid(WorldRuntime))
 			continue;
+
 		const bool bWorldCompleted = CompletedWorldTypesForCurrentExchange.Contains(WorldRuntime->GetWorldType());
-		const bool bShouldFastForward = bCanFastForward && bVisibleWorldCompleted && WorldRuntime != VisibleWorldRuntime && !bWorldCompleted;
+		const bool bHiddenWorld = WorldRuntime->GetWorldType() == EBattleSimulationWorldType::PlayerDeceivedEnemyActual;
+		const bool bShouldFastForward = bCanFastForward && bPresentationWorldsCompleted && bHiddenWorld && !bWorldCompleted;
 		WorldRuntime->SetSimulationTimeScale(bShouldFastForward ? FastForwardSimulationTimeScale : 1.0f);
 		bAnyWorldFastForwarding |= bShouldFastForward;
 	}
@@ -215,23 +219,11 @@ void ABattleSimulationManager::ResetSimulationWorldTimeScales()
 
 void ABattleSimulationManager::HandlePhaseEntryRequested(EBattlePhase OldPhase, EBattlePhase NewPhase, UBattlePhaseTaskContext* TaskContext)
 {
+	(void)OldPhase;
 	(void)TaskContext;
-
-	if (OldPhase == EBattlePhase::Targeting && NewPhase != EBattlePhase::Targeting && PresentationController)
-	{
-		PresentationController->SetPlayerSimulationViewChangeLocked(false);
-	}
 
 	switch (NewPhase)
 	{
-	case EBattlePhase::Targeting:
-		if (PresentationController)
-		{
-			PresentationController->SetPlayerSimulationView(EBattlePlayerSimulationView::ActualSelf);
-			PresentationController->SetPlayerSimulationViewChangeLocked(true);
-		}
-		break;
-
 	case EBattlePhase::ExchangeEnd:
 		if (PresentationController) 
 			PresentationController->ClearAllPreviewData();
@@ -253,7 +245,11 @@ void ABattleSimulationManager::HandlePhaseEntryRequested(EBattlePhase OldPhase, 
 void ABattleSimulationManager::HandlePhaseExecutionRequested(EBattlePhase OldPhase, EBattlePhase NewPhase, UBattlePhaseTaskContext* TaskContext)
 {
 	(void)OldPhase;
-	if ((NewPhase != EBattlePhase::BattleStart && NewPhase != EBattlePhase::RoundStart && NewPhase != EBattlePhase::SimulationSequence) || !TaskContext)
+	if ((NewPhase != EBattlePhase::BattleStart &&
+		 NewPhase != EBattlePhase::RoundStart &&
+		 NewPhase != EBattlePhase::SimulationSequence &&
+		 NewPhase != EBattlePhase::ExchangeEnd &&
+		 NewPhase != EBattlePhase::BattleActionSequenceStart) || !TaskContext)
 		return;
 	PhaseExecutionTask = TaskContext->RegisterTask(this);
 	if (!PhaseExecutionTask)
@@ -269,6 +265,12 @@ void ABattleSimulationManager::HandlePhaseExecutionRequested(EBattlePhase OldPha
 		break;
 	case EBattlePhase::SimulationSequence:
 		ExecuteSimulationSequence();
+		break;
+	case EBattlePhase::ExchangeEnd:
+		ExecuteExchangeEnd();
+		break;
+	case EBattlePhase::BattleActionSequenceStart:
+		ExecuteBattleActionSequenceStart();
 		break;
 	default:
 		break;
@@ -316,6 +318,26 @@ void ABattleSimulationManager::ExecuteSimulationSequence()
 
 	UE_LOG(LogTemp, Error, TEXT("[BattleSimulationManager] Failed to execute current exchange simulation."));
 	CompletePhaseExecution(EBattlePhase::SimulationSequence);
+}
+
+void ABattleSimulationManager::ExecuteExchangeEnd()
+{
+	// SimulationSequence가 끝난 직후의 AD/DD 결과 위치를 사용한다.
+	// DD Presentation Actor는 BattleStart에서 이미 생성되어 있으므로 여기서는 Transform/Visibility만 갱신한다.
+	if (bCreateDDActor && IsValid(PresentationController.Get()))
+		PresentationController->RefreshDDPresentationAtExchangeEnd();
+
+	CompletePhaseExecution(EBattlePhase::ExchangeEnd);
+}
+
+void ABattleSimulationManager::ExecuteBattleActionSequenceStart()
+{
+	// DD marker는 simulation 결과 확인용 presentation이다.
+	// 실제 BattleAction 재생에 들어가기 전에 숨기고, prewarmed actor 자체는 재사용한다.
+	if (IsValid(PresentationController.Get()))
+		PresentationController->HideDDPresentation();
+
+	CompletePhaseExecution(EBattlePhase::BattleActionSequenceStart);
 }
 
 void ABattleSimulationManager::NotifySimulationWorldExecutionStarted(UBattleSimulationWorldRuntime* WorldRuntime, const FBattleAction& Action, const FTargetingResult& TargetingResult)
@@ -408,6 +430,21 @@ bool ABattleSimulationManager::InitializeBattleSimulation()
 		DestroySimulationWorldRuntimes();
 		return false;
 	}
+
+	// DD presentation is optional. When enabled, prewarm the enemy-only marker once during BattleStart.
+	// Round/Simulation presentation only reuses this actor by moving and hiding/showing it.
+	if (bCreateDDActor)
+	{
+		ABattleCharacter_Enemy* SourceEnemy = RuntimeContext->GetEnemyCharacter();
+		if (!IsValid(SourceEnemy) || !PresentationController->PrewarmDDPresentationActor(SourceEnemy))
+		{
+			DestroySimulationWorldRuntimes();
+			PresentationController->Shutdown();
+			PresentationController = nullptr;
+			return false;
+		}
+	}
+
 	return true;
 }
 

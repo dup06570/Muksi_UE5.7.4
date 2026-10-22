@@ -6,12 +6,14 @@
 #include "Muksi/Contents/Battle/Execution/Data/BattleExecutionTypes.h"
 #include "BattleActionExecutor.generated.h"
 
+class ABattleCharacterBase;
 class ABattleGridManager;
+class ABattleSequenceManager;
+class UBattleSimulationWorldRuntime;
 class UBattleExecutionRunner;
 class UMuksiBattleAnimationComponent;
 class UMuksiBattleCardDataAsset;
 
-DECLARE_DELEGATE_OneParam(FBattleActionStartedDelegate, const FBattleAction&);
 DECLARE_DELEGATE(FBattleActionCompletedDelegate);
 DECLARE_DELEGATE_FourParams(FBattleActionExecutionEntryStartedDelegate, const FBattleAction&, const FBattleExecutionEntry&, int32, const FTargetingResult&);
 
@@ -24,29 +26,34 @@ public:
 	bool Initialize(ABattleGridManager* InGridManager, EBattleSimulationWorldType InGridWorldType);
 	bool ExecuteBattleAction(const FBattleAction& Action);
 	void Stop();
+	void StopAfterCurrentExecution();
 	bool IsRunning() const { return bRunning; }
 
-	FBattleActionStartedDelegate OnBattleActionStarted;
+private:
+	friend class ABattleSequenceManager;
+	friend class UBattleSimulationWorldRuntime;
+
 	FBattleActionCompletedDelegate OnBattleActionCompleted;
 	FBattleActionExecutionEntryStartedDelegate OnExecutionEntryStarted;
 
-private:
 	bool ValidateAction(const FBattleAction& Action) const;
 	bool ResolveActionTargetingResult(const FBattleAction& Action, FTargetingResult& OutTargetingResult) const;
 	UMuksiBattleCardDataAsset* ResolveExecutionCard(const FBattleAction& Action) const;
-	bool BindAttackerNotify();
-	void UnbindAttackerNotify();
+	bool BindExecutionNotifySources();
+	void UnbindExecutionNotifySources();
+	ABattleCharacterBase* ResolveNotifySource(const FBattleExecutionNotify& ExecutionNotify) const;
 	bool RunMainExecutionEntries();
-	void RunExecutionEntriesForNotify(FName NotifyKey);
-	bool RunExecutionEntries(const TArray<FBattleExecutionEntry>& ExecutionEntries);
+	void RunExecutionEntriesForNotify(ABattleCharacterBase* NotifySource, FName NotifyKey, FName SourceAnimKey);
+	bool RunExecutionEntries(const TArray<FBattleExecutionEntry>& ExecutionEntries, ABattleCharacterBase* ExecutionSource = nullptr);
 	void HandleExecutionEntryStarted(const FBattleExecutionEntry& Entry, int32 EntryIndex, FBattleExecutionContext& InOutExecutionContext);
 	void HandleExecutionRunnerFinished(UBattleExecutionRunner* FinishedRunner);
 	void TryCompleteAction();
 	void CompleteAction();
 	void ResetRuntime();
+	void RestorePresentationCharacters();
 
 	UFUNCTION()
-	void HandleBattleExecutionNotify(FName NotifyKey);
+	void HandleBattleExecutionNotify(ABattleCharacterBase* NotifySource, FName NotifyKey, FName SourceAnimKey);
 
 private:
 	UPROPERTY(Transient)
@@ -62,11 +69,13 @@ private:
 	FTargetingResult ActionTargetingResult;
 
 	UPROPERTY(Transient)
-	TObjectPtr<UMuksiBattleAnimationComponent> AttackerAnimationComponent = nullptr;
+	TArray<TObjectPtr<UMuksiBattleAnimationComponent>> NotifyAnimationComponents;
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UBattleExecutionRunner>> ActiveExecutionRunners;
 
 	EBattleSimulationWorldType GridWorldType = EBattleSimulationWorldType::PlayerActualEnemyActual;
+	TSharedPtr<TArray<TWeakObjectPtr<ABattleCharacterBase>>> PresentationCharacters;
 	bool bRunning = false;
+	bool bStopAfterCurrentExecution = false;
 };

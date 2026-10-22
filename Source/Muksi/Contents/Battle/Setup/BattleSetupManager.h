@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "Muksi/Contents/Battle/Data/BattlePhase.h"
 #include "Muksi/Contents/Battle/Hex/HexOffsetCoord.h"
+#include "Muksi/Contents/Battle/Setup/AssetPreload/BattleAssetPreloadManager.h"
 #include "BattleSetupManager.generated.h"
 
 class ABattleCharacterBase;
@@ -12,7 +13,9 @@ class ABattleCharacter_Enemy;
 class ABattleGridManager;
 class ABattleManager;
 class UMuksiCharacterDataAsset;
+class UBattlePhaseTask;
 class UBattlePhaseTaskContext;
+class UBattleAssetPreloadManager;
 
 /**
  * Ready 단계의 전투 데이터 준비, 캐릭터 생성, 초기 배치와 사망 이벤트 연결을 담당한다.
@@ -27,6 +30,9 @@ public:
     ABattleSetupManager();
     bool InitializeBattleFlow(ABattleManager* InBattleManager, ABattleGridManager* InBattleGridManager);
 
+    UFUNCTION(BlueprintPure, Category = "Battle|Preload")
+    UBattleAssetPreloadManager* GetAssetPreloadManager() const { return AssetPreloadManager; }
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -35,11 +41,12 @@ private:
     UFUNCTION()
     void HandlePhaseEntryRequested(EBattlePhase OldPhase, EBattlePhase NewPhase, UBattlePhaseTaskContext* TaskContext);
 
-    bool PrepareReadyData();
+    bool PrepareReadyData(UBattlePhaseTask* Task);
     bool PrepareReadyEnd();
     bool ShouldHandlePhaseEntry(EBattlePhase Phase) const;
     void LoadEncounterEnemyCharacterData();
     bool CreateBattleCharacters();
+    void FaceCharactersTowardEachOther(ABattleCharacterBase* PlayerCharacter, ABattleCharacterBase* EnemyCharacter) const;
     void BindBattleEndEvents();
     void UnbindBattleEndEvents();
 
@@ -50,7 +57,13 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<ABattleManager> BattleManager = nullptr;
 
-    UPROPERTY(EditAnywhere, Category = "Battle|Setup|Grid")
+    UPROPERTY(Transient)
+    TObjectPtr<UBattleAssetPreloadManager> AssetPreloadManager = nullptr;
+
+    UPROPERTY(EditAnywhere, Category = "Battle|Setup|Preload", meta = (ClampMin = "1.0"))
+    float RenderPreparationTimeoutSeconds = 60.0f;
+
+    UPROPERTY(Transient)
     TObjectPtr<ABattleGridManager> BattleGridManager = nullptr;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Setup|Character", meta = (AllowPrivateAccess = "true"))

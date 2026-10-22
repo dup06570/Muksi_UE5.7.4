@@ -4,6 +4,7 @@
 #include "Muksi/Contents/Battle/Grid/BattleGridManager.h"
 #include "Muksi/Contents/Battle/Hex/HexGridMath.h"
 #include "Muksi/Contents/Battle/Targeting/Pattern/AreaPattern.h"
+#include "Muksi/Contents/Battle/Targeting/Resolver/BattleTargetResolver.h"
 #include "Muksi/Contents/Battle/Targeting/Selection/TargetSelection.h"
 #include "Muksi/Contents/Battle/Targeting/Types/TargetingOriginSource.h"
 
@@ -39,7 +40,7 @@ bool UBattleTargetingSession::UpdateSelection(const FHexOffsetCoord& CandidateCo
     }
 
     FTargetingStep Step;
-    if (!EvaluateCandidate(CandidateCoord, Step))
+    if (!EvaluateCandidate(CandidateCoord, Step) && !FindNearestValidSelectionStep(CandidateCoord, Step))
     {
         ResetCurrentStep();
         return false;
@@ -68,7 +69,8 @@ bool UBattleTargetingSession::UpdateSelection(const FHexOffsetCoord& CandidateCo
     }
 
     FTargetingStepResult TargetingStepResult;
-    if (!BuildTargetingStepResult(Step, TargetingStepResult))
+
+    if (!StepData || !FBattleTargetResolver::BuildStepResult(GridManager.Get(), GridWorldType, *StepData, Step, TargetingStepResult))
     {
         ResetCurrentStep();
         return false;
@@ -227,42 +229,46 @@ bool UBattleTargetingSession::EvaluateCandidate(const FHexOffsetCoord& Candidate
     return Selection->EvaluateCandidate(GridManager.Get(), OriginCoord, CandidateCoord, StepData->Selection.RuleData, OutStep);
 }
 
-bool UBattleTargetingSession::BuildTargetingStepResult(const FTargetingStep& Step, FTargetingStepResult& OutStepResult) const
+bool UBattleTargetingSession::FindNearestValidSelectionStep(const FHexOffsetCoord& DesiredCoord, FTargetingStep& OutStep) const
 {
-    OutStepResult.Reset();
-
-    if (!Step.HasOriginCoord() || !Step.HasTargetCoord())
-        return false;
+    OutStep.Reset();
 
     const FTargetingStepCardData* StepData = GetCurrentStepData();
-    if (!StepData || !IsValid(GridManager.Get()))
+    if (!StepData || !StepData->Selection.RuleClass || !IsValid(GridManager.Get()))
         return false;
 
-    OutStepResult.Step = Step;
+    const UTargetSelection* Selection = StepData->Selection.RuleClass->GetDefaultObject<UTargetSelection>();
+    if (!Selection)
+        return false;
 
-    if (!StepData->Pattern.PatternClass)
+    FHexOffsetCoord OriginCoord;
+    if (!GetCurrentOriginCoord(OriginCoord))
+        return false;
+
+    TArray<FHexOffsetCoord> CandidateCoords;
+    Selection->CollectCandidateCoords(GridManager.Get(), OriginCoord, StepData->Selection.RuleData, CandidateCoords);
+
+    int32 BestDesiredDistance = MAX_int32;
+    int32 BestOriginDistance = MAX_int32;
+
+    for (const FHexOffsetCoord& CandidateCoord : CandidateCoords)
     {
-        OutStepResult.AffectedCoords.Add(Step.TargetCoord);
-    }
-    else
-    {
-        const UAreaPattern* Pattern = StepData->Pattern.PatternClass->GetDefaultObject<UAreaPattern>();
-        if (!Pattern)
-            return false;
+        FTargetingStep CandidateStep;
+        if (!Selection->EvaluateCandidate(GridManager.Get(), OriginCoord, CandidateCoord, StepData->Selection.RuleData, CandidateStep))
+            continue;
 
-        Pattern->ApplyPattern(
-            GridManager.Get(),
-            GridWorldType,
-            StepData->Pattern.PatternData,
-            Step.OriginCoord,
-            Step.TargetCoord,
-            Step.Direction,
-            OutStepResult.AffectedCoords,
-            OutStepResult.PathCoords);
+        const int32 DesiredDistance = FHexGridMath::GetHexDistance(DesiredCoord, CandidateCoord);
+        const int32 OriginDistance = FHexGridMath::GetHexDistance(OriginCoord, CandidateCoord);
+
+        if (DesiredDistance > BestDesiredDistance || (DesiredDistance == BestDesiredDistance && OriginDistance >= BestOriginDistance))
+            continue;
+
+        BestDesiredDistance = DesiredDistance;
+        BestOriginDistance = OriginDistance;
+        OutStep = MoveTemp(CandidateStep);
     }
 
-    GridManager->GetCharactersAtCoords(GridWorldType, OutStepResult.AffectedCoords, OutStepResult.Targets);
-    return true;
+    return OutStep.HasTargetCoord();
 }
 
 bool UBattleTargetingSession::BuildIntent()

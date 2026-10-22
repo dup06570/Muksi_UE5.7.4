@@ -2,11 +2,16 @@
 
 #include "Muksi/Contents/Battle/BattleManager.h"
 #include "MuksiStatusEffect.h"
-#include "MuksiStatusEffectSubsystem.h"
+#include "MuksiIncomingDamageModifierStatusEffect.h"
+#include "MuksiStatusEffectRegistry.h"
+#include "MuksiStatusEffectIDs.h"
+#include "StatusEffectDefinitionDataAsset.h"
 #include "Muksi/Contents/Battle/Data/BattleAction.h"
 #include "Muksi/Contents/Battle/Character/BattleCharacterBase.h"
 #include "Muksi/Contents/Battle/Execution/Core/BattleExecutionRunner.h"
+#include "Muksi/Contents/Battle/FX/MuksiBattleFXComponent.h"
 #include "Muksi/Contents/Battle/Execution/Data/BattleExecutionContext.h"
+#include "Muksi/Contents/Battle/Sequence/BattleSequenceManager.h"
 
 UMuksiStatusEffectComponent::UMuksiStatusEffectComponent()
 {
@@ -15,83 +20,145 @@ UMuksiStatusEffectComponent::UMuksiStatusEffectComponent()
 
 void UMuksiStatusEffectComponent::Initialize(ABattleManager* InBattleManager)
 {
-    BattleManager = InBattleManager;
-}
+	if (IsValid(BattleManager) && IsValid(BattleManager->GetBattleSequenceManager()))
+	{
+		BattleManager->GetBattleSequenceManager()->BattleActionStartedDelegate.RemoveAll(this);
+		BattleManager->GetBattleSequenceManager()->BattleActionCompletedDelegate.RemoveAll(this);
+		BattleManager->GetBattleSequenceManager()->BattleExchangeCompletedDelegate.RemoveAll(this);
+	}
 
-void UMuksiStatusEffectComponent::CopyRuntimeStateFrom(const UMuksiStatusEffectComponent& SourceComponent)
-{
-    FinishExecution();
-    ActiveEffects.Reset();
-    for (UMuksiStatusEffect* SourceEffect : SourceComponent.ActiveEffects)
-    {
-        if (!IsValid(SourceEffect)) continue;
-        UMuksiStatusEffect* NewEffect = NewObject<UMuksiStatusEffect>(this, SourceEffect->GetClass());
-        if (!IsValid(NewEffect)) continue;
-        NewEffect->CopyRuntimeStateFrom(*SourceEffect, GetOwner());
-        ActiveEffects.Add(NewEffect);
-    }
+	BattleManager = InBattleManager;
+
+	if (IsValid(BattleManager) && IsValid(BattleManager->GetBattleSequenceManager()))
+	{
+		BattleManager->GetBattleSequenceManager()->BattleActionStartedDelegate.AddUObject(this, &UMuksiStatusEffectComponent::HandleBattleActionStarted);
+		BattleManager->GetBattleSequenceManager()->BattleActionCompletedDelegate.AddUObject(this, &UMuksiStatusEffectComponent::HandleBattleActionCompleted);
+		BattleManager->GetBattleSequenceManager()->BattleExchangeCompletedDelegate.AddUObject(this, &UMuksiStatusEffectComponent::HandleBattleExchangeCompleted);
+	}
 }
 
 void UMuksiStatusEffectComponent::ResetRuntimeState()
 {
 	FinishExecution();
+
 	const bool bHadActiveEffects = !ActiveEffects.IsEmpty();
+
+	for (UMuksiStatusEffect* Effect : ActiveEffects)
+	{
+		if (!IsValid(Effect))
+			continue;
+
+		StopStatusEffectAuraFX(Effect->GetEffectID());
+		Effect->OnRemoved();
+	}
+
 	ActiveEffects.Reset();
-	if (bHadActiveEffects) OnStatusEffectsChanged.Broadcast();
+
+	if (bHadActiveEffects)
+		OnStatusEffectsChanged.Broadcast();
 }
 
 void UMuksiStatusEffectComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    FinishExecution();
+	FinishExecution();
 
-    BattleManager = nullptr;
+	if (IsValid(BattleManager) && IsValid(BattleManager->GetBattleSequenceManager()))
+	{
+		BattleManager->GetBattleSequenceManager()->BattleActionStartedDelegate.RemoveAll(this);
+		BattleManager->GetBattleSequenceManager()->BattleActionCompletedDelegate.RemoveAll(this);
+		BattleManager->GetBattleSequenceManager()->BattleExchangeCompletedDelegate.RemoveAll(this);
+	}
 
-    Super::EndPlay(EndPlayReason);
+	BattleManager = nullptr;
+
+	Super::EndPlay(EndPlayReason);
 }
 
-UMuksiStatusEffect* UMuksiStatusEffectComponent::AddStatusEffect(FName EffectID,int32 StackCount,int32 Duration)
+UMuksiStatusEffect* UMuksiStatusEffectComponent::AddStatusEffect(FName EffectID, int32 StackCount, int32 Duration)
 {
     if (EffectID.IsNone())
-    {
         return nullptr;
-    }
 
     StackCount = FMath::Max(1, StackCount);
     Duration = FMath::Max(1, Duration);
 
-    UMuksiStatusEffectSubsystem* StatusEffectSubsystem = UMuksiStatusEffectSubsystem::Get(this);
+	FName OpposingEffectID = NAME_None;
 
-    TSubclassOf<UMuksiStatusEffect> EffectClass = StatusEffectSubsystem->FindEffectClass(EffectID);
+	if (EffectID == MuksiStatusEffectIDs::ReduceDamage)
+		OpposingEffectID = MuksiStatusEffectIDs::MultiplyDamage;
+	else if (EffectID == MuksiStatusEffectIDs::MultiplyDamage)
+		OpposingEffectID = MuksiStatusEffectIDs::ReduceDamage;
 
-    if (!EffectClass)
-    {
-        UE_LOG(LogTemp, Error,TEXT("[StatusEffectComponent] Cannot find EffectClass. EffectID: %s"),*EffectID.ToString());
-        return nullptr;
-    }
+	if (!OpposingEffectID.IsNone())
+	{
+		if (UMuksiStatusEffect* OpposingEffect = FindEffectByID(OpposingEffectID))
+		{
+			if (OpposingEffect->GetCurrentStack() > StackCount)
+			{
+				OpposingEffect->ConsumeStack(StackCount);
+				OnStatusEffectsChanged.Broadcast();
+				return OpposingEffect;
+			}
+
+			StackCount -= OpposingEffect->GetCurrentStack();
+			RemoveStatusEffect(OpposingEffect);
+
+			if (StackCount <= 0)
+				return nullptr;
+		}
+	}
 
     if (UMuksiStatusEffect* ExistingEffect = FindEffectByID(EffectID))
     {
         ExistingEffect->OnReapplied(StackCount, Duration);
-
+		PlayAppliedStatusEffectFX(FindStatusEffectDefinition(EffectID));
         OnStatusEffectsChanged.Broadcast();
-
         return ExistingEffect;
     }
 
-    UMuksiStatusEffect* NewEffect = NewObject<UMuksiStatusEffect>(this,EffectClass);
+    if (!IsValid(BattleManager))
+    {
+        UE_LOG(LogTemp, Error, TEXT("[StatusEffectComponent] BattleManager is unavailable."));
+        return nullptr;
+    }
 
-    NewEffect->Initialize(GetOwner(),EffectID,StackCount,Duration);
+    UMuksiStatusEffectRegistry* StatusEffectRegistry = BattleManager->GetStatusEffectRegistry();
+    if (!StatusEffectRegistry)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[StatusEffectComponent] StatusEffectRegistry is unavailable."));
+        return nullptr;
+    }
 
+    UStatusEffectDefinitionDataAsset* EffectDefinition = StatusEffectRegistry->FindDefinition(EffectID);
+    if (!EffectDefinition)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[StatusEffectComponent] Cannot find EffectDefinition. EffectID: %s"), *EffectID.ToString());
+        return nullptr;
+    }
+
+    TSubclassOf<UMuksiStatusEffect> EffectClass = EffectDefinition->EffectClass.LoadSynchronous();
+    if (!EffectClass)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[StatusEffectComponent] Cannot find EffectClass. EffectID: %s"), *EffectID.ToString());
+        return nullptr;
+    }
+
+    UMuksiStatusEffect* NewEffect = NewObject<UMuksiStatusEffect>(this, EffectClass);
+    if (!NewEffect)
+        return nullptr;
+
+    NewEffect->Initialize(GetOwner(), EffectID, StackCount, Duration);
     ActiveEffects.Add(NewEffect);
-
     NewEffect->OnApplied();
-
+	StartStatusEffectAuraFX(EffectDefinition);
+	PlayAppliedStatusEffectFX(EffectDefinition);
+    ApplyStatusEffectToCurrentBattleAction(NewEffect);
     OnStatusEffectsChanged.Broadcast();
 
     return NewEffect;
 }
 
-UMuksiStatusEffect* UMuksiStatusEffectComponent::SubtractStatusEffect(FName EffectID,int32 StackCount,int32 Duration)
+UMuksiStatusEffect* UMuksiStatusEffectComponent::SubtractStatusEffect(FName EffectID, int32 StackCount, int32 Duration)
 {
     if (EffectID.IsNone())
     {
@@ -140,6 +207,7 @@ void UMuksiStatusEffectComponent::RemoveStatusEffect(UMuksiStatusEffect* Effect)
         return;
     }
 
+    StopStatusEffectAuraFX(Effect->GetEffectID());
     Effect->OnRemoved();
 
     ActiveEffects.Remove(Effect);
@@ -186,13 +254,212 @@ const TArray<TObjectPtr<UMuksiStatusEffect>>& UMuksiStatusEffectComponent::GetAc
     return ActiveEffects;
 }
 
-void UMuksiStatusEffectComponent::AppendBattleActionStartExecutionEntries(const FBattleAction& BattleAction, TArray<FBattleExecutionEntry>& OutExecutionEntries) const
+UStatusEffectDefinitionDataAsset* UMuksiStatusEffectComponent::FindStatusEffectDefinition(FName EffectID) const
 {
+    if (!IsValid(BattleManager))
+        return nullptr;
+
+    UMuksiStatusEffectRegistry* StatusEffectRegistry = BattleManager->GetStatusEffectRegistry();
+    if (!StatusEffectRegistry)
+        return nullptr;
+
+    return StatusEffectRegistry->FindDefinition(EffectID);
+}
+
+void UMuksiStatusEffectComponent::HandleBattleActionStarted(FBattleAction& CurrentAction, FBattleAction& OpponentAction)
+{
+	if (CurrentAction.Attacker.Get() != GetOwner() || CurrentAction.bStatusEffectEditLocked)
+		return;
+
+	TArray<UMuksiStatusEffect*> EditingEffects;
+	EditingEffects.Reserve(ActiveEffects.Num());
+
+	for (UMuksiStatusEffect* Effect : ActiveEffects)
+	{
+		if (IsValid(Effect))
+			EditingEffects.Add(Effect);
+	}
+
+	EditingEffects.StableSort([](const UMuksiStatusEffect& A, const UMuksiStatusEffect& B)
+	{
+		return A.GetBattleActionEditPriority() < B.GetBattleActionEditPriority();
+	});
+
+	for (UMuksiStatusEffect* Effect : EditingEffects)
+	{
+		if (CurrentAction.bStatusEffectEditLocked)
+			break;
+
+		Effect->EditBattleActions(CurrentAction, OpponentAction);
+	}
+}
+
+void UMuksiStatusEffectComponent::HandleBattleActionCompleted(const FBattleAction& CompletedAction)
+{
+	if (CompletedAction.Attacker.Get() != GetOwner())
+		return;
+
 	const TArray<TObjectPtr<UMuksiStatusEffect>> EffectsSnapshot = ActiveEffects;
+
 	for (UMuksiStatusEffect* Effect : EffectsSnapshot)
 	{
-		if (IsValid(Effect)) Effect->BuildBattleActionStartExecutionEntries(BattleAction, OutExecutionEntries);
+		if (IsValid(Effect))
+			Effect->OnBattleActionCompleted(CompletedAction);
 	}
+
+	RemoveExpiredEffects();
+}
+
+void UMuksiStatusEffectComponent::HandleBattleExchangeCompleted(int32 ExchangeIndex)
+{
+	const TArray<TObjectPtr<UMuksiStatusEffect>> EffectsSnapshot = ActiveEffects;
+
+	for (UMuksiStatusEffect* Effect : EffectsSnapshot)
+	{
+		if (IsValid(Effect))
+			Effect->OnBattleExchangeCompleted(ExchangeIndex);
+	}
+
+	RemoveExpiredEffects();
+}
+
+void UMuksiStatusEffectComponent::ApplyStatusEffectToCurrentBattleAction(UMuksiStatusEffect* Effect)
+{
+	if (!IsValid(Effect) || !IsValid(BattleManager) || !IsValid(BattleManager->GetBattleSequenceManager()))
+		return;
+
+	FBattleAction* CurrentAction = nullptr;
+	FBattleAction* OpponentAction = nullptr;
+
+	if (!BattleManager->GetBattleSequenceManager()->GetCurrentBattleActionPair(CurrentAction, OpponentAction))
+		return;
+
+	if (!CurrentAction || !OpponentAction || CurrentAction->Attacker.Get() != GetOwner() || CurrentAction->bStatusEffectEditLocked)
+		return;
+
+	BattleManager->GetBattleSequenceManager()->RefreshBattleActionTargetingResult(*CurrentAction);
+	BattleManager->GetBattleSequenceManager()->RefreshBattleActionTargetingResult(*OpponentAction);
+	Effect->EditBattleActions(*CurrentAction, *OpponentAction);
+}
+
+void UMuksiStatusEffectComponent::PlayAppliedStatusEffectFX(const UStatusEffectDefinitionDataAsset* EffectDefinition)
+{
+	if (!EffectDefinition || EffectDefinition->FXSettings.AppliedFXDataAssetKey.IsNone())
+		return;
+
+	ABattleCharacterBase* BattleCharacter = Cast<ABattleCharacterBase>(GetOwner());
+	if (!BattleCharacter)
+		return;
+
+	UMuksiBattleFXComponent* BattleFXComponent = BattleCharacter->GetBattleFXComponent();
+	if (!BattleFXComponent)
+		return;
+
+	if (!EffectDefinition->FXSettings.bWaitForAppliedFX || !bAppliedFXWaitActive)
+	{
+		BattleFXComponent->PlayImpactFXByDataAssetKey(EffectDefinition->FXSettings.AppliedFXDataAssetKey);
+		return;
+	}
+
+	++PendingAppliedFXCount;
+
+	UE_LOG(LogTemp, Warning, TEXT("Applied FX Wait Started: %s, Pending: %d, Time: %.3f"),
+		*EffectDefinition->FXSettings.AppliedFXDataAssetKey.ToString(),
+		PendingAppliedFXCount,
+		GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f);
+
+	FSimpleDelegate CompletionDelegate;
+	CompletionDelegate.BindUObject(this, &UMuksiStatusEffectComponent::HandleAppliedStatusEffectFXFinished);
+	BattleFXComponent->PlayOneShotFXByDataAssetKey(EffectDefinition->FXSettings.AppliedFXDataAssetKey, MoveTemp(CompletionDelegate));
+}
+
+void UMuksiStatusEffectComponent::StartStatusEffectAuraFX(const UStatusEffectDefinitionDataAsset* EffectDefinition)
+{
+	if (!EffectDefinition || EffectDefinition->FXSettings.AuraFXDataAssetKey.IsNone())
+		return;
+
+	ABattleCharacterBase* BattleCharacter = Cast<ABattleCharacterBase>(GetOwner());
+	if (!BattleCharacter)
+		return;
+
+	UMuksiBattleFXComponent* BattleFXComponent = BattleCharacter->GetBattleFXComponent();
+	if (!BattleFXComponent)
+		return;
+
+	BattleFXComponent->StartPersistentFX(EffectDefinition->FXSettings.AuraFXDataAssetKey);
+}
+
+void UMuksiStatusEffectComponent::StopStatusEffectAuraFX(FName EffectID)
+{
+	const UStatusEffectDefinitionDataAsset* EffectDefinition = FindStatusEffectDefinition(EffectID);
+	if (!EffectDefinition || EffectDefinition->FXSettings.AuraFXDataAssetKey.IsNone())
+		return;
+
+	ABattleCharacterBase* BattleCharacter = Cast<ABattleCharacterBase>(GetOwner());
+	if (!BattleCharacter)
+		return;
+
+	UMuksiBattleFXComponent* BattleFXComponent = BattleCharacter->GetBattleFXComponent();
+	if (!BattleFXComponent)
+		return;
+
+	BattleFXComponent->StopPersistentFX(EffectDefinition->FXSettings.AuraFXDataAssetKey);
+}
+
+void UMuksiStatusEffectComponent::HandleAppliedStatusEffectFXFinished()
+{
+	UE_LOG(LogTemp, Warning, TEXT("Applied FX Wait Finished, Pending Before: %d, Time: %.3f"),
+		PendingAppliedFXCount,
+		GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f);
+
+	PendingAppliedFXCount = FMath::Max(0, PendingAppliedFXCount - 1);
+	TryFinishAppliedFXWait();
+}
+
+void UMuksiStatusEffectComponent::BeginAppliedFXWait(FSimpleDelegate CompletionDelegate)
+{
+	if (bAppliedFXWaitActive)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MuksiStatusEffectComponent] Applied FX wait is already active."));
+		CompletionDelegate.ExecuteIfBound();
+		return;
+	}
+
+	bAppliedFXWaitActive = true;
+	bAppliedFXWaitSealed = false;
+	PendingAppliedFXCount = 0;
+	AppliedFXWaitCompletionDelegate = MoveTemp(CompletionDelegate);
+}
+
+void UMuksiStatusEffectComponent::EndAppliedFXWait()
+{
+	if (!bAppliedFXWaitActive)
+		return;
+
+	bAppliedFXWaitSealed = true;
+	TryFinishAppliedFXWait();
+}
+
+void UMuksiStatusEffectComponent::TryFinishAppliedFXWait()
+{
+	if (!bAppliedFXWaitActive || !bAppliedFXWaitSealed || PendingAppliedFXCount > 0)
+		return;
+
+	bAppliedFXWaitActive = false;
+	bAppliedFXWaitSealed = false;
+	PendingAppliedFXCount = 0;
+
+	FSimpleDelegate CompletionDelegate = MoveTemp(AppliedFXWaitCompletionDelegate);
+	AppliedFXWaitCompletionDelegate.Unbind();
+	CompletionDelegate.ExecuteIfBound();
+}
+
+void UMuksiStatusEffectComponent::CancelAppliedFXWait()
+{
+	bAppliedFXWaitActive = false;
+	bAppliedFXWaitSealed = false;
+	PendingAppliedFXCount = 0;
+	AppliedFXWaitCompletionDelegate.Unbind();
 }
 
 void UMuksiStatusEffectComponent::AppendHitDealtExecutionEntries(const FBattleExecutionContext& Context, int32 Damage, TArray<FBattleExecutionEntry>& OutExecutionEntries) const
@@ -200,7 +467,8 @@ void UMuksiStatusEffectComponent::AppendHitDealtExecutionEntries(const FBattleEx
 	const TArray<TObjectPtr<UMuksiStatusEffect>> EffectsSnapshot = ActiveEffects;
 	for (UMuksiStatusEffect* Effect : EffectsSnapshot)
 	{
-		if (IsValid(Effect)) Effect->BuildHitDealtExecutionEntries(Context, Damage, OutExecutionEntries);
+		if (IsValid(Effect))
+			Effect->BuildHitDealtExecutionEntries(Context, Damage, OutExecutionEntries);
 	}
 }
 
@@ -209,31 +477,84 @@ void UMuksiStatusEffectComponent::AppendHitReceivedExecutionEntries(const FBattl
 	const TArray<TObjectPtr<UMuksiStatusEffect>> EffectsSnapshot = ActiveEffects;
 	for (UMuksiStatusEffect* Effect : EffectsSnapshot)
 	{
-		if (IsValid(Effect)) Effect->BuildHitReceivedExecutionEntries(Context, Damage, OutExecutionEntries);
+		if (IsValid(Effect))
+			Effect->BuildHitReceivedExecutionEntries(Context, Damage, OutExecutionEntries);
 	}
 }
 
-void UMuksiStatusEffectComponent::RemoveExpiredEffects()
+int32 UMuksiStatusEffectComponent::ApplyIncomingDamageModifiers(int32 Damage, FName& OutHitReactionAnimKey)
 {
-    bool bRemovedAny = false;
+	FIncomingDamageModifierContext IncomingDamageContext;
+	IncomingDamageContext.OriginalDamage = FMath::Max(0, Damage);
+	IncomingDamageContext.RemainingDamage = IncomingDamageContext.OriginalDamage;
 
-    for (int32 Index = ActiveEffects.Num() - 1; Index >= 0; --Index)
-    {
-        UMuksiStatusEffect* Effect = ActiveEffects[Index];
+	OutHitReactionAnimKey = NAME_None;
 
-        if (Effect && Effect->IsExpired())
-        {
-            Effect->OnRemoved();
-            ActiveEffects.RemoveAt(Index);
+	TArray<UMuksiIncomingDamageModifierStatusEffect*> DamageModifiers;
 
-            bRemovedAny = true;
-        }
-    }
+	for (UMuksiStatusEffect* Effect : ActiveEffects)
+	{
+		UMuksiIncomingDamageModifierStatusEffect* DamageModifier = Cast<UMuksiIncomingDamageModifierStatusEffect>(Effect);
 
-    if (bRemovedAny)
-    {
-        OnStatusEffectsChanged.Broadcast();
-    }
+		if (IsValid(DamageModifier))
+			DamageModifiers.Add(DamageModifier);
+	}
+
+	DamageModifiers.StableSort([](const UMuksiIncomingDamageModifierStatusEffect& A, const UMuksiIncomingDamageModifierStatusEffect& B)
+	{
+		return A.GetIncomingDamageModifierPriority() < B.GetIncomingDamageModifierPriority();
+	});
+
+	bool bModifierStateChanged = false;
+
+	for (UMuksiIncomingDamageModifierStatusEffect* DamageModifier : DamageModifiers)
+	{
+		if (IncomingDamageContext.RemainingDamage <= 0)
+			break;
+
+		const int32 StackBeforeModifier = DamageModifier->GetCurrentStack();
+		const int32 DamageBeforeModifier = IncomingDamageContext.RemainingDamage;
+
+		DamageModifier->ModifyIncomingDamage(IncomingDamageContext);
+		IncomingDamageContext.RemainingDamage = FMath::Max(0, IncomingDamageContext.RemainingDamage);
+
+		if (StackBeforeModifier != DamageModifier->GetCurrentStack())
+			bModifierStateChanged = true;
+
+		if (OutHitReactionAnimKey.IsNone() && IncomingDamageContext.RemainingDamage < DamageBeforeModifier)
+			OutHitReactionAnimKey = DamageModifier->GetHitReactionAnimKey();
+	}
+
+	const bool bRemovedExpiredEffect = RemoveExpiredEffects(false);
+
+	if (bModifierStateChanged || bRemovedExpiredEffect)
+		OnStatusEffectsChanged.Broadcast();
+
+	return IncomingDamageContext.RemainingDamage;
+}
+
+bool UMuksiStatusEffectComponent::RemoveExpiredEffects(bool bNotify)
+{
+	bool bRemovedAny = false;
+
+	for (int32 Index = ActiveEffects.Num() - 1; Index >= 0; --Index)
+	{
+		UMuksiStatusEffect* Effect = ActiveEffects[Index];
+
+		if (Effect && Effect->IsExpired())
+		{
+			StopStatusEffectAuraFX(Effect->GetEffectID());
+			Effect->OnRemoved();
+			ActiveEffects.RemoveAt(Index);
+
+			bRemovedAny = true;
+		}
+	}
+
+	if (bRemovedAny && bNotify)
+		OnStatusEffectsChanged.Broadcast();
+
+	return bRemovedAny;
 }
 
 void UMuksiStatusEffectComponent::ExecuteSequentially(EBattlePhase OldPhase, EBattlePhase NewPhase,FSimpleDelegate CompletionDelegate)
@@ -300,6 +621,10 @@ void UMuksiStatusEffectComponent::RunPhaseExecutionEntries(const TArray<FBattleE
 		return;
 	}
 
+	FSimpleDelegate CompletionDelegate;
+	CompletionDelegate.BindUObject(this, &UMuksiStatusEffectComponent::ExecuteNextStatusEffect);
+	BeginAppliedFXWait(MoveTemp(CompletionDelegate));
+
 	FBattleExecutionContext Context;
 	Context.ExecutionMode = EBattleExecutionMode::ActualBattle;
 	Context.Attacker = OwnerCharacter;
@@ -314,12 +639,10 @@ void UMuksiStatusEffectComponent::RunPhaseExecutionEntries(const TArray<FBattleE
 void UMuksiStatusEffectComponent::HandlePhaseExecutionRunnerFinished(UBattleExecutionRunner* FinishedRunner)
 {
 	if (!bExecuting || FinishedRunner != PhaseExecutionRunner)
-	{
 		return;
-	}
 
 	PhaseExecutionRunner = nullptr;
-	ExecuteNextStatusEffect();
+	EndAppliedFXWait();
 }
 
 void UMuksiStatusEffectComponent::FinishExecution()
@@ -334,6 +657,7 @@ void UMuksiStatusEffectComponent::FinishExecution()
     ExecutingNewPhase = EBattlePhase::None;
 	PhaseExecutionRunner = nullptr;
     ExecutionIndex = INDEX_NONE;
+	CancelAppliedFXWait();
     ExecutionQueue.Reset();
     FSimpleDelegate CompletionDelegate = MoveTemp(ExecutionCompletionDelegate);
     ExecutionCompletionDelegate.Unbind();

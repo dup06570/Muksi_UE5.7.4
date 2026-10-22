@@ -16,8 +16,11 @@ class ABattleSetupManager;
 class ABattleSimulationManager;
 class ABattleTargetingManager;
 class UBattleCardManager;
+class ABattleCameraManager;
 class ABattleCharacterBase;
 class UMuksiBattleCardDataAsset;
+class UMuksiStatusEffectRegistry;
+class UStatusEffectRegistryDataAsset;
 struct FTargetingIntent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnBattlePhaseStageRequested, EBattlePhase, OldPhase, EBattlePhase, NewPhase, UBattlePhaseTaskContext*, TaskContext);
@@ -77,12 +80,20 @@ public:
     ABattleSequenceManager* GetBattleSequenceManager() const { return BattleSequenceManager; }
     
     UFUNCTION(BlueprintPure, Category = "Battle|Managers")
-    UBattleCardManager* GetBattleCardManager() const{ return BattleCardManager; }
+    UBattleCardManager* GetBattleCardManager() const { return BattleCardManager; }
+    
+    UFUNCTION(BlueprintPure, Category = "Battle|Managers")
+    ABattleCameraManager* GetBattleCameraManager() const { return BattleCameraManager; }
+
+    UMuksiStatusEffectRegistry* GetStatusEffectRegistry() const { return StatusEffectRegistry; }
 
     EBattlePhase GetCurrentPhase() const { return CurrentPhase; }
 
     void RestartCurrentExchangeCardSelection();
-    void NotifyBattleCharacterDead();
+    void NotifyBattleCharacterDead(ABattleCharacterBase* DeadCharacter);
+
+    UFUNCTION(BlueprintCallable, Category = "Battle")
+    void RequestBattleEnd();
     bool SubmitTargetingAction(ABattleCharacterBase* Attacker, UMuksiBattleCardDataAsset* Card, const FTargetingIntent& TargetingIntent, bool bPlayerAction);
     void StartBattleFlow();
 
@@ -116,6 +127,10 @@ private:
     void BattleActionSequenceStart();
     void BattleActionSequenceEnd();
     bool ShouldEndBattle() const;
+    void PrepareBattleEnd();
+    void StartDeathHitSlowMotion(ABattleCharacterBase* DeadCharacter);
+    void FinishDeathHitSlowMotion();
+    void FinishDeathBattleEndDelay();
     void EndBattleLevel();
 
     void AdvanceExchange();
@@ -154,6 +169,15 @@ protected:
     
     UPROPERTY(Transient, BlueprintReadOnly, Category = "Battle|Managers", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UBattleCardManager> BattleCardManager = nullptr;
+    
+    UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Battle|Managers", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<ABattleCameraManager> BattleCameraManager = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Status Effect", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UStatusEffectRegistryDataAsset> StatusEffectRegistryDataAsset = nullptr;
+
+    UPROPERTY(Transient)
+    TObjectPtr<UMuksiStatusEffectRegistry> StatusEffectRegistry = nullptr;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
     EBattlePhase CurrentPhase = EBattlePhase::None;
@@ -161,7 +185,22 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle")
     EBattlePhase PreviousPhase = EBattlePhase::None;
 
-    bool bIsCharacterDead = false;
+    UPROPERTY(EditAnywhere, Category = "Battle|End")
+    float DeathHitSlowMotionTimeDilation = 0.15f;
+
+    UPROPERTY(EditAnywhere, Category = "Battle|End")
+    float DeathHitSlowMotionDuration = 0.6f;
+
+    UPROPERTY(EditAnywhere, Category = "Battle|End")
+    float DeathMontageBlendOutTime = 0.1f;
+
+    UPROPERTY(EditAnywhere, Category = "Battle|End")
+    float DeathBattleEndDelay = 1.0f;
+
+    TWeakObjectPtr<ABattleCharacterBase> DeadBattleCharacter;
+    FTimerHandle DeathHitSlowMotionTimerHandle;
+    FTimerHandle DeathBattleEndTimerHandle;
+    bool bBattleEndRequested = false;
     bool bBattleFlowInitialized = false;
     bool bBattleFlowStarted = false;
 };

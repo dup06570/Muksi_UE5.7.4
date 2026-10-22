@@ -6,21 +6,23 @@
 #include "Widgets/Widget_ActivatableBase.h"
 #include "Muksi/Contents/Battle/Data/BattlePhase.h"
 #include "Muksi/Contents/Battle/Data/BattleAction.h"
-#include "Muksi/Contents/Battle/Simulation/Data/BattleSimulationTypes.h"
 #include "Widget_BattleMainScreen.generated.h"
 
+class UCardPreviewPanel;
+class UCanvasPanel;
+class UWidget_BattleFloatingTextCanvas;
 class UBattleStatusHUDWidget;
 class UWidget_CharacterData;
-class UHandWidget;
 class UInkLineWidget;
 class UPassiveActivePopupWidget;
 class UMuksiBattleCardDataAsset;
 class UBattlePhaseTask;
 class UBattlePhaseTaskContext;
 class UBattlePipelineWidget;
-class UExchangeControlWidget;
-class UWidget_BattleCardBase;
-
+class UWidget_BattleControlPanel;
+class UWidget_BattleSkillRevealPanel;
+class UEffectDescriptionPopup;
+class UWidget_CardPreviewCanvas;
 
 class ABattleCharacterBase;
 class UButton;
@@ -49,19 +51,23 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Battle")
 	void BP_OnSelectableCharacterClicked();
 
+	
+	//테스트 용도
+	UFUNCTION()
+	void HandleBattleActionPresentationRequested(const FBattleAction& BattleAction);
 protected:
 	//~Begin UCommonActivatableWidget Interface
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
-
-	virtual FReply NativeOnMouseButtonDown( const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	
 
 	virtual void NativeOnActivated() override;
 	//~End UCommonActivatableWidget Interface
 
 	//***** Bound Widgets ****
+	
 	UPROPERTY(meta = (BindWidget))
-	UHandWidget* HandWidget;
+	TObjectPtr<UWidget_CardPreviewCanvas> CardPreviewCanvas;
 
 	UPROPERTY(meta = (BindWidget))
 	UPassiveActivePopupWidget* ActivePassiveWidget;
@@ -73,10 +79,18 @@ protected:
 	UBattlePipelineWidget* BattlePipelineWidget;
 	
 	UPROPERTY(meta = (BindWidget))
-	UExchangeControlWidget* ExchangeControlWidget;
+	TObjectPtr<UWidget_BattleControlPanel> BattleControlPanel;
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UWidget_BattleSkillRevealPanel> BattleSkillRevealPanel;
 
 	//***** Bound Widgets ****
+protected:
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget_BattleFloatingTextCanvas> FloatingTextCanvas;
+
 private:
+
 	UPROPERTY()
 	TObjectPtr<ABattleManager> BattleManager;
 
@@ -92,42 +106,30 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UBattlePhaseTask> PhaseUITask;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Effect Popup")
+	TSubclassOf<UEffectDescriptionPopup> EffectDescriptionPopupClass;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UEffectDescriptionPopup> EffectDescriptionPopup;
+	
 public:
 	UFUNCTION()
 	void SetCharacterData(ABattleCharacterBase* Player, ABattleCharacterBase* Enemy);
-
-	UFUNCTION(BlueprintCallable)
-	void BindHandWidgetEvents();
-
-	UFUNCTION(BlueprintCallable)
-	void UnbindHandWidgetEvents();
 	
 	UFUNCTION(BlueprintCallable)
 	void BindBattlePipelineWidgetEvents();
 	
 	UFUNCTION(BlueprintCallable)
 	void UnbindBattlePipelineWidgetEvents();
+	
+	
 
-
-	UFUNCTION(BlueprintCallable, Category = "Battle|Simulation|View")
-	bool SetSimulationPlayerView(EBattlePlayerSimulationView View);
-
-	UFUNCTION(BlueprintCallable, Category = "Battle|Simulation|View")
-	bool ToggleSimulationPlayerView();
-
-	UFUNCTION(BlueprintPure, Category = "Battle|Simulation|View")
-	EBattlePlayerSimulationView GetSimulationPlayerView() const;
-
-	UFUNCTION(BlueprintPure, Category = "Battle|Simulation|View")
-	bool CanToggleSimulationPlayerView() const;
 
 	bool CanRequestEndExchange();
 
 	// 카드 슬롯에서 장착 해제될 때 진행 중인 타겟팅/대기 카드 상태를 함께 정리한다.
 	void NotifyPlayerCardUnequipped();
 	
-private:
-	void HandleDeceiveRevealFinished(UWidget_BattleCardBase* CardWidget);
 
 	//---------------------------중앙 텍스트 블록 관련 함수---------------------------------------------------------------
 public:
@@ -140,6 +142,30 @@ protected:
 	void BindBattleSequenceManagerEvents();
 	void UnbindBattleSequenceManagerEvents();
 	
+	void BindBattleSkillReveal();
+	void UnbindBattleSkillReveal();
+	void HandleRevealSkillHovered(UMuksiBattleCardDataAsset* SkillData, bool bIsPlayerSkill);
+	void HandleRevealSkillUnHovered(bool bIsPlayerSkill);
+	
+	void BindBattleSkillEvent();
+	void UnbindBattleSkillEvent();
+	
+	void BindBattleControlPanelEvents();
+	void UnbindBattleControlPanelEvents();
+	void BindBattleInputEvents();
+	void UnbindBattleInputEvents();
+	void HandleBattleSkillSelected(const FGuid& InstanceId, UMuksiBattleCardDataAsset* CardData);
+	void HandleBattleSkillSlotInput(int32 SlotIndex);
+
+	void HandleBattleSkillHovered(UMuksiBattleCardDataAsset* SkillData, int32 RemainingCooldown);
+	void HandleBattleSkillUnhovered();
+	
+	void HandleCardRevealPreviewFinished(int32 ExchangeIndex);
+	
+	void HandleBattleSkillCostChanged();
+	
+	void HandlePlayerTargetingCancelled();
+	
 	void BattlePipelineWidgetSetting(EBattlePhase BattlePhase);
 
 	UFUNCTION()
@@ -149,8 +175,10 @@ protected:
 
 	void HandleDeceiveCardRevealRequested(const FBattleAction& BattleAction);
 	
+	
 	UPROPERTY()
 	int32 HandleUIFinishCount = 0;
+	
 
 	//====================================Ready<준비>===================================================================
 public:
@@ -182,7 +210,6 @@ public:
 	//국 종료
 	void RoundEnd();
 	
-	void ClearExchangeSlots()const;
 	
 	void DisplayRoundEndUIFinish();
 
@@ -201,41 +228,42 @@ public:
 
 	void StartExchangeSelectCard(int32 ExchangeIndex);
 	void FinishExchange(int32 ExchangeIndex);
+	
+	void ControlPanelTargetingMode(bool IsTargeting);
 
 	void ExchangeEnd();
 
 	void HandleExchangeEndFinish();
 
 protected:
-	void HandleExchangeSlot(int32 Index, bool bActive);
-	void HandleEnemyCardRevealFinished(int32 ExchangeIndex);
+	void HandleSkillSlot(bool bActive);
 	void SetBattleCardToHand();
-	void ClearBattleCard()const;
+	void SetBattleSkillSetting();
 	
+	void HandleSkillRevealFinished(int32 ExchangeIndex);
 	void TimeOutCardSelect();
+	
+	bool UpdateCurrentExchangeSkillReveal();
 public:
 	
 	void HandleEnemyCardSelectionReady(UMuksiBattleCardDataAsset* EnemyCard, int32 ExchangeIndex);
 
 public:
 	//합 도중 카드 선택 확정 버튼
-	UFUNCTION(BlueprintCallable)
-	void HandleCardSelect();
-
-	void SelectCardDataSend()const;
-
-
-	bool RevealEnemySelectedCard(int32 ExchangeIndex);
+	
 	//------------------------------------------------------------------------------------------------------------------
 	
 	//==========================Card Reveal=============================================================================
 public:
 	
 protected:
-	void HandleTurnOrderAnimationsFinished(int32 ExchangeIndex);
-	
 	void CardRevealed();
-	bool PlayCurrentExchangeTurnOrderAnimation(int32 ExchangeIndex) const;
+	
+	void RefreshBattleSkillUI();
+	
+	void HandleBattleSkillStateChanged();
+	
+	void HandleSkillRevealDeceiveRequested(const FBattleAction& Action);
 	//------------------------------------------------------------------------------------------------------------------
 
 	//==========================Battle Action Sequence==================================================================
@@ -247,8 +275,8 @@ public:
 
 	// 비동기 Reveal 연출을 시작했으면 true를 반환하고, 연출 종료 시 NotifyDeceiveCardRevealFinished()를 호출한다.
 	UFUNCTION(BlueprintNativeEvent, Category = "Battle|Deceive")
-	bool PlayDeceiveCardReveal(const FBattleAction& BattleAction, UMuksiBattleCardDataAsset* DeceivedCard, UMuksiBattleCardDataAsset* ActualCard);
-	virtual bool PlayDeceiveCardReveal_Implementation(const FBattleAction& BattleAction, UMuksiBattleCardDataAsset* DeceivedCard, UMuksiBattleCardDataAsset* ActualCard);
+	bool PlayDeceiveCardReveal(const FBattleAction& BattleAction, UMuksiBattleCardDataAsset* PresentedCard, UMuksiBattleCardDataAsset* ActualCard);
+	virtual bool PlayDeceiveCardReveal_Implementation(const FBattleAction& BattleAction, UMuksiBattleCardDataAsset* PresentedCard, UMuksiBattleCardDataAsset* ActualCard);
 
 	UFUNCTION(BlueprintCallable, Category = "Battle|Deceive")
 	void NotifyDeceiveCardRevealFinished();

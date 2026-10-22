@@ -9,13 +9,17 @@ enum class EStatusEffectExecutionOperation : uint8
 {
 	Add,
 	Subtract,
-	Remove
+	Remove,
+	RemoveAndAdd
 };
 
 USTRUCT(BlueprintType)
 struct FStatusEffectExecutionData : public FBattleExecutionData
 {
 	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "StatusEffect")
+	EBattleExecutionTargetPolicy TargetPolicy = EBattleExecutionTargetPolicy::TargetingResult;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "StatusEffect")
 	EStatusEffectExecutionOperation Operation = EStatusEffectExecutionOperation::Add;

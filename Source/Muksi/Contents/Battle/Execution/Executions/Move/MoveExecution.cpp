@@ -178,14 +178,10 @@ void UMoveExecution::HandleMovementFinished(bool bInterrupted)
 bool UMoveExecution::CommitGridMovement()
 {
 	if (!MovingCharacter || !GridManager || !NavigationComponent)
-	{
 		return false;
-	}
 
 	if (!NavigationComponent->IsCellAvailable(GridWorldType, DestinationCoord, MovingCharacter.Get()))
-	{
 		return false;
-	}
 
 	// Grid 점유와 CharacterData.CurrentPosition을 원자적으로 갱신한다.
 	FBattleGridMoveRequest Request;
@@ -194,6 +190,8 @@ bool UMoveExecution::CommitGridMovement()
 	Request.FromCoord = StartCoord;
 	Request.ToCoord = DestinationCoord;
 	Request.bSnapActorToGrid = true;
+	Request.bPreserveActorRotation = true;
+
 	return GridManager->ExecuteGridMove(Request).bSucceeded;
 }
 
@@ -215,18 +213,30 @@ void UMoveExecution::RestoreStartWorldLocation()
 void UMoveExecution::RequestMovementEndAnimation()
 {
 	if (!AnimationComponent || !bHasMoveData)
+		return;
+
+	FName EndSection = NAME_None;
+
+	switch (CachedMoveData.MoveType)
 	{
+	case EMuksiBattleMoveType::GroundPath:
+		EndSection = CachedMoveData.GroundPathEndSection;
+		break;
+
+	case EMuksiBattleMoveType::Teleport:
+		EndSection = CachedMoveData.TeleportEndSection;
+		break;
+
+	default:
 		return;
 	}
 
-	if (CachedMoveData.MoveType != EMuksiBattleMoveType::GroundPath)
-	{
+	if (EndSection.IsNone())
 		return;
-	}
 
-	const bool bJumpedToSection = AnimationComponent->JumpCurrentMontageToSection(CachedMoveData.GroundPathEndSection);
+	const bool bJumpedToSection = AnimationComponent->JumpCurrentMontageToSection(EndSection);
 
-	UE_LOG(LogTemp, Log, TEXT("[MoveExecution] Request End Section. Section=%s Result=%s"), *CachedMoveData.GroundPathEndSection.ToString(), bJumpedToSection ? TEXT("Success") : TEXT("Failed"));
+	UE_LOG(LogTemp, Log, TEXT("[MoveExecution] Request End Section. MoveType=%d Section=%s Result=%s"), static_cast<int32>(CachedMoveData.MoveType), *EndSection.ToString(), bJumpedToSection ? TEXT("Success") : TEXT("Failed"));
 }
 
 void UMoveExecution::FinishMoveExecution(bool bRequestEndAnimation)

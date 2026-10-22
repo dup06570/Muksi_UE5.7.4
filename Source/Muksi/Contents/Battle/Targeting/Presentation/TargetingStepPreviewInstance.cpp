@@ -60,24 +60,34 @@ void UTargetingStepPreviewInstance::UpdatePreview(const FTargetingPreviewContext
 		ActivePathPreviewVisualizer->ClearPreview();
 	}
 
-	if (ActiveAffectedAreaPreviewVisualizer && PreviewContext.IsStepValid())
+	if (ActiveAreaPreviewVisualizer && PreviewContext.IsStepValid())
 	{
-		ActiveAffectedAreaPreviewVisualizer->UpdatePreview(PreviewContext);
+		ActiveAreaPreviewVisualizer->UpdatePreview(PreviewContext);
 	}
-	else if (ActiveAffectedAreaPreviewVisualizer)
+	else if (ActiveAreaPreviewVisualizer)
 	{
-		ActiveAffectedAreaPreviewVisualizer->ClearPreview();
+		ActiveAreaPreviewVisualizer->ClearPreview();
 	}
 
 	AffectedHighlightCoords.Reset();
+
+	if (ActiveAreaPreviewVisualizer && PreviewContext.IsStepValid())
+		ActiveAreaPreviewVisualizer->CollectHighlightCoords(PreviewContext, AffectedHighlightCoords);
+
 	if (bShowAffectedHighlight)
 	{
-		if (const TArray<FHexOffsetCoord>* AffectedCoords = PreviewContext.GetAffectedCoords())
+		if (PreviewContext.TargetingStep)
+		{
+			for (const FTargetingGroup& Group : PreviewContext.TargetingStep->Groups)
+			{
+				for (const FHexOffsetCoord& Coord : Group.AffectedCoords)
+					AffectedHighlightCoords.AddUnique(Coord);
+			}
+		}
+		else if (const TArray<FHexOffsetCoord>* AffectedCoords = PreviewContext.GetAffectedCoords())
 		{
 			for (const FHexOffsetCoord& Coord : *AffectedCoords)
-			{
 				AffectedHighlightCoords.AddUnique(Coord);
-			}
 		}
 	}
 }
@@ -153,12 +163,12 @@ void UTargetingStepPreviewInstance::CreateVisualizers(
 		ActivePathPreviewVisualizer->Initialize(PreviewActor.Get());
 	}
 
-	if (PresentationSettings.bShowAffectedArea
-		&& StepData.Presentation.Visualizers.AffectedArea.Visualizer
-		&& !StepData.Presentation.Visualizers.AffectedArea.Visualizer->HasAnyClassFlags(CLASS_Abstract))
+	if (PresentationSettings.bShowArea
+		&& StepData.Presentation.Visualizers.Area.Visualizer
+		&& !StepData.Presentation.Visualizers.Area.Visualizer->HasAnyClassFlags(CLASS_Abstract))
 	{
-		ActiveAffectedAreaPreviewVisualizer = NewObject<UAreaPreviewVisualizer>(this, StepData.Presentation.Visualizers.AffectedArea.Visualizer);
-		ActiveAffectedAreaPreviewVisualizer->Initialize(PreviewActor.Get());
+		ActiveAreaPreviewVisualizer = NewObject<UAreaPreviewVisualizer>(this, StepData.Presentation.Visualizers.Area.Visualizer);
+		ActiveAreaPreviewVisualizer->Initialize(PreviewActor.Get());
 	}
 }
 
@@ -174,12 +184,12 @@ void UTargetingStepPreviewInstance::ClearVisualizers()
 		ActivePathPreviewVisualizer->ClearPreview();
 	}
 
-	if (ActiveAffectedAreaPreviewVisualizer)
+	if (ActiveAreaPreviewVisualizer)
 	{
-		ActiveAffectedAreaPreviewVisualizer->ClearPreview();
+		ActiveAreaPreviewVisualizer->ClearPreview();
 	}
 
 	ActiveSelectionPreviewVisualizer = nullptr;
 	ActivePathPreviewVisualizer = nullptr;
-	ActiveAffectedAreaPreviewVisualizer = nullptr;
+	ActiveAreaPreviewVisualizer = nullptr;
 }

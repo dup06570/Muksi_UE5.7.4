@@ -17,3 +17,29 @@ void UBattleStatusHUDWidget::SetData(ABattleCharacterBase* Player, ABattleCharac
 		CharacterStatusWidget_Enemy->SetData(Enemy);
 	}
 }
+
+void UBattleStatusHUDWidget::SetPlayerCostPreview(int32 Cost)
+{
+	if (CharacterStatusWidget_Player)
+	{
+		CharacterStatusWidget_Player->SetCostPreview(Cost);
+	}
+}
+
+void UBattleStatusHUDWidget::ClearPlayerCostPreview()
+{
+	if (CharacterStatusWidget_Player)
+	{
+		CharacterStatusWidget_Player->ClearCostPreview();
+	}
+}
+
+void UBattleStatusHUDWidget::RefreshEnemyCost()
+{
+	if (CharacterStatusWidget_Enemy)
+	{
+		CharacterStatusWidget_Enemy->RefreshCost();
+	}
+}
+
+

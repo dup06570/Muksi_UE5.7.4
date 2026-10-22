@@ -4,12 +4,13 @@
 #include "Muksi/Widgets/Battle/Hand/Card/BattleCardManager.h"
 
 #include "Muksi/Contents/Battle/BattleManager.h"
-#include "Muksi/Contents/Battle/Character/BattleCardComponent.h"
 #include "Muksi/Contents/Battle/Character/BattleCharacterBase.h"
 #include "Muksi/Contents/Battle/Character/BattleCharacter_Enemy.h"
 #include "Muksi/Contents/Battle/Character/BattleCharacter_Player.h"
+#include "Muksi/Contents/Battle/Character/BattleSkillComponent.h"
 #include "Muksi/Contents/Battle/Flow/BattlePhaseTask.h"
 #include "Muksi/Contents/Battle/Runtime/BattleRuntimeContext.h"
+#include "Muksi/Contents/Battle/Sequence/BattleSequenceManager.h"
 
 bool UBattleCardManager::InitializeBattleFlow(ABattleManager* InBattleManager)
 {
@@ -21,6 +22,7 @@ bool UBattleCardManager::InitializeBattleFlow(ABattleManager* InBattleManager)
 	BattleManager = InBattleManager;
 
 	BattleManager->PhaseEntryRequestedDelegate.AddUniqueDynamic(this, &UBattleCardManager::HandlePhaseEntryRequested);
+	BindDeceiveCardRevealEvent();
 
 	return true;
 }
@@ -73,10 +75,6 @@ void UBattleCardManager::HandlePhaseEntryRequested(EBattlePhase OldPhase, EBattl
 
 	case EBattlePhase::RoundEnd:
 		{
-			UE_LOG(
-				LogTemp,
-				Warning,
-				TEXT("[BattleCardManager] RoundEnd Entry"));
 			HandleRoundEnd();
 			break;
 		}
@@ -108,17 +106,17 @@ void UBattleCardManager::HandleRoundStart()
 
 	if (PlayerCharacter)
 	{
-		if (UBattleCardComponent* CardComponent = PlayerCharacter->GetBattleCardComponent())
+		if (UBattleSkillComponent* SkillComponent = PlayerCharacter->GetBattleSkillComponent())
 		{
-			CardComponent->RefillHandIfEmpty();
+			SkillComponent->ReduceCooldowns();
 		}
 	}
 
 	if (EnemyCharacter)
 	{
-		if (UBattleCardComponent* CardComponent = EnemyCharacter->GetBattleCardComponent())
+		if (UBattleSkillComponent* SkillComponent = EnemyCharacter->GetBattleSkillComponent())
 		{
-			CardComponent->RefillHandIfEmpty();
+			SkillComponent->ReduceCooldowns();
 		}
 	}
 }
@@ -138,47 +136,83 @@ void UBattleCardManager::HandleRoundEnd()
 	}
 
 	ABattleCharacterBase* PlayerCharacter = BattleRuntimeContext->GetPlayerCharacter();
+
 	ABattleCharacterBase* EnemyCharacter = BattleRuntimeContext->GetEnemyCharacter();
 
 	if (PlayerCharacter)
 	{
-		if (UBattleCardComponent* CardComponent = PlayerCharacter->GetBattleCardComponent())
+		if (UBattleSkillComponent* SkillComponent = PlayerCharacter->GetBattleSkillComponent())
 		{
-			CardComponent->ConsumeCommittedCards();
+			SkillComponent->RecoverSkillCost();
 		}
 	}
 
 	if (EnemyCharacter)
 	{
-		if (UBattleCardComponent* CardComponent = EnemyCharacter->GetBattleCardComponent())
+		if (UBattleSkillComponent* SkillComponent = EnemyCharacter->GetBattleSkillComponent())
 		{
-			CardComponent->ConsumeCommittedCards();
+			SkillComponent->RecoverSkillCost();
 		}
 	}
 }
 
+void UBattleCardManager::BindDeceiveCardRevealEvent()
+{
+	if (!BattleManager)
+	{
+		UE_LOG(LogTemp, Error, TEXT("BattleManager is nullptr (Widget_BattleMainScreen.cpp)"));
+		return;
+	}
+	ABattleSequenceManager* BattleSequenceManager = BattleManager->GetBattleSequenceManager();
+	if (!BattleSequenceManager)
+	{
+		return;
+	}
+
+	BattleSequenceManager->DeceiveCardRevealRequestedDelegate.AddUObject(this,&UBattleCardManager::HandleDeceiveCardRevealRequested);
+}
+
+void UBattleCardManager::HandleDeceiveCardRevealRequested(const FBattleAction& BattleAction)
+{
+	if (BattleAction.bPlayerAction)
+	{
+		return;
+	}
+
+	ABattleCharacterBase* Attacker = BattleAction.Attacker.Get();
+
+	if (!IsValid(Attacker))
+	{
+		return;
+	}
+
+	UBattleSkillComponent* SkillComponent = Attacker->GetBattleSkillComponent();
+
+	if (!SkillComponent)
+	{
+		return;
+	}
+
+	UMuksiBattleCardDataAsset* PresentedSkill = BattleAction.Card.Get();
+
+	if (!IsValid(PresentedSkill))
+	{
+		return;
+	}
+
+	SkillComponent->RevealActualSkillCost(PresentedSkill);
+}
+
+
 bool UBattleCardManager::ReplaceHandCard(ABattleCharacterBase* Character, const FGuid& InstanceId,
-	UMuksiBattleCardDataAsset* NewCardData)
+                                         UMuksiBattleCardDataAsset* NewCardData)
 {
 	if (!IsValid(Character) || !IsValid(NewCardData))
 	{
 		return false;
 	}
+	
 
-	UBattleCardComponent* CardComponent =
-		Character->GetBattleCardComponent();
-
-	if (!IsValid(CardComponent))
-	{
-		return false;
-	}
-
-	if (!CardComponent->ReplaceHandCard(
-		InstanceId,
-		NewCardData))
-	{
-		return false;
-	}
 	ABattleCharacterBase* PlayerCharacter =
 	BattleManager->GetBattleRuntimeContext()->GetPlayerCharacter();
 
@@ -214,120 +248,90 @@ bool UBattleCardManager::ResolveEnemyPanicOnTimeout(int32 ExchangeIndex, FCharac
 		return false;
 	}
 
-	UBattleRuntimeContext* RuntimeContext = BattleManager->GetBattleRuntimeContext();
+	UBattleRuntimeContext* RuntimeContext =
+		BattleManager->GetBattleRuntimeContext();
 
 	if (!RuntimeContext)
 	{
 		return false;
 	}
 
-	return ResolveCharacterPanicOnTimeout(RuntimeContext->GetEnemyCharacter(), ExchangeIndex,OutResult);
+	ABattleCharacterBase* EnemyCharacter =
+		RuntimeContext->GetEnemyCharacter();
+
+	if (!EnemyCharacter)
+	{
+		return false;
+	}
+
+	return ResolveCharacterPanicOnTimeout(
+		EnemyCharacter,
+		ExchangeIndex,
+		OutResult);
 }
 
+
 bool UBattleCardManager::ResolveCharacterPanicOnTimeout(ABattleCharacterBase* Character, int32 ExchangeIndex,
-	FCharacterPanicTimeoutResult& OutResult)
+                                                        FCharacterPanicTimeoutResult& OutResult)
 {
 	OutResult = FCharacterPanicTimeoutResult();
 
-    if (!IsValid(Character))
-    {
-        return false;
-    }
+	if (!IsValid(Character))
+	{
+		return false;
+	}
 
-    UBattleCardComponent* CardComponent = Character->GetBattleCardComponent();
-    UMuksiCharacterDataAsset* CharacterData = Character->GetCharacterData();
-
-    if (!CardComponent || !CharacterData)
-    {
-        return false;
-    }
-
-    //Commit 된 카드가 Panic 카드인지 확인
-    const FBattleCardInstance* ExistingCard = CardComponent->GetCommittedCardByExchange(ExchangeIndex);
-
-    if (ExistingCard)
-    {
-        if (ExistingCard->Source == EBattleCardInstanceSource::Panic)
-        {
-            OutResult.PanicCard = *ExistingCard; //Panic 카드면 그냥 쓰기
-            return true;
-        }
-    }
-
-    
-//Panic 카드 배열 가져오기
-    TArray<const FCharacterPanicData*> ValidPanicDataArray;
-
-    for (const FCharacterPanicData& PanicData : CharacterData->TimeoutPenalties)
-    {
-        if (PanicData.IsValid())
-        {
-            ValidPanicDataArray.Add(&PanicData);
-        }
-    }
-
-    if (ValidPanicDataArray.IsEmpty())
-    {
-        UE_LOG(
-            LogTemp,
-            Error,
-            TEXT(
-                "[BattleCardManager] "
-                "No valid Panic penalty cards. Character=%s"),
-            *GetNameSafe(Character));
-
-        return false;
-    }
-
-    
-	//Panic 카드 선택
-    const int32 RandomIndex = FMath::RandHelper(ValidPanicDataArray.Num());
-
-    const FCharacterPanicData* SelectedPanicData = ValidPanicDataArray[RandomIndex];
-
-    if (!SelectedPanicData)
-    {
-        return false;
-    }
 	
 
-	//commit 된 일반 카드 있으면 되돌리기
-    if (ExistingCard)
-    {
-        OutResult.ReturnedCard = *ExistingCard;
-        OutResult.bReturnedCard = true;
+	TArray<const FCharacterPanicData*> ValidPanicDataArray;
 
-        const FGuid ExistingCardId = ExistingCard->InstanceId;
+	for (const FCharacterPanicData& PanicData : Character->GetTimeoutPenalties())
+	{
+		if (PanicData.IsValid())
+		{
+			ValidPanicDataArray.Add(&PanicData);
+		}
+	}
 
-        if (!CardComponent->ReturnCommittedCard(ExistingCardId))
-        {
-            return false;
-        }
-    }
+	if (ValidPanicDataArray.IsEmpty())
+	{
+		UE_LOG(
+			LogTemp,
+			Error,
+			TEXT(
+				"[BattleCardManager] "
+				"No valid Panic data. Character=%s"),
+			*GetNameSafe(Character)
+		);
 
-    // 손패 랜덤 카드 한 장 버림
-    OutResult.bDiscardedCard = CardComponent->DiscardRandomHandCard(OutResult.DiscardedCard);
+		return false;
+	}
 
-    // 랜덤으로 선택된 Panic 카드 Commit
-    if (!CardComponent->CommitPanicCard(SelectedPanicData->PenaltyCard,OutResult.PanicCard))
-    {
-        return false;
-    }
+	const int32 RandomIndex =
+		FMath::RandHelper(ValidPanicDataArray.Num());
 
-    UE_LOG(
-        LogTemp,
-        Warning,
-        TEXT(
-            "[BattleCardManager] "
-            "Panic timeout resolved. "
-            "Character=%s PanicCard=%s DiscardedCard=%s"),
-        *GetNameSafe(Character),
-        *GetNameSafe(OutResult.PanicCard.CardData),
-        OutResult.bDiscardedCard
-            ? *GetNameSafe(OutResult.DiscardedCard.CardData)
-            : TEXT("None"));
+	const FCharacterPanicData* SelectedPanicData =
+		ValidPanicDataArray[RandomIndex];
 
-    return true;
+	if (!SelectedPanicData ||
+		!SelectedPanicData->PenaltyCard)
+	{
+		return false;
+	}
+
+	OutResult.PanicCard = SelectedPanicData->PenaltyCard;
+
+	UE_LOG(
+		LogTemp,
+		Warning,
+		TEXT(
+			"[BattleCardManager] "
+			"Panic selected. Character=%s Panic=%s"),
+		*GetNameSafe(Character),
+		*GetNameSafe(OutResult.PanicCard)
+	);
+
+	return true;
 }
 
 

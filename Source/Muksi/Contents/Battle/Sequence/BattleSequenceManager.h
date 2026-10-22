@@ -14,11 +14,16 @@ class UBattleRuntimeContext;
 class UBattlePhaseTask;
 class UBattlePhaseTaskContext;
 class UBattleActionExecutor;
+class UBattleActionPresenter;
+class ABattleSkillInfoActor;
+class UBattleActionGroupController;
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FDeceiveCardRevealRequestedDelegate, const FBattleAction&);
-DECLARE_MULTICAST_DELEGATE_OneParam(FBattleSequenceActionStartedDelegate, const FBattleAction&);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FBattleSequenceActionStartedDelegate, FBattleAction&, FBattleAction&);
 DECLARE_MULTICAST_DELEGATE_OneParam(FBattleSequenceActionCompletedDelegate, const FBattleAction&);
+DECLARE_MULTICAST_DELEGATE_OneParam(FBattleSequenceExchangeCompletedDelegate, int32);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBattleActionPresentationRequested, const FBattleAction&, BattleAction);
 UCLASS()
 class MUKSI_API ABattleSequenceManager : public AActor
 {
@@ -35,11 +40,14 @@ public:
 	// 실제 BattleActionQueue에서 변초 Action 실행 직전에 Reveal UI를 요청한다.
 	FDeceiveCardRevealRequestedDelegate DeceiveCardRevealRequestedDelegate;
 
-	// 실제 AA BattleAction 실행 시작 이벤트.
+	// 실제 BattleAction 실행 직전 이벤트. 현재 Action과 같은 합의 상대 Action을 함께 편집할 수 있다.
 	FBattleSequenceActionStartedDelegate BattleActionStartedDelegate;
 
 	// 단일 BattleAction 완료 이벤트.
 	FBattleSequenceActionCompletedDelegate BattleActionCompletedDelegate;
+
+	// 같은 ExchangeIndex의 BattleAction들이 모두 끝난 직후 이벤트.
+	FBattleSequenceExchangeCompletedDelegate BattleExchangeCompletedDelegate;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Sequence")
 	TObjectPtr<ABattleGridManager> BattleGridManager = nullptr;
@@ -57,6 +65,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Battle|Sequence")
 	void NotifyDeceiveCardRevealFinished();
+	void StopAfterCurrentExecution();
+	bool GetCurrentBattleActionPair(FBattleAction*& OutCurrentAction, FBattleAction*& OutOpponentAction);
+	bool RefreshBattleActionTargetingResult(FBattleAction& Action) const;
+	void ApplyBattleActionRuntimeModifier(FBattleAction& Action) const;
 
 	void InitializeBattleRuntimeContext(UBattleRuntimeContext* InBattleRuntimeContext);
 
@@ -69,6 +81,8 @@ private:
 	bool bBattleActionSequenceRunning = false;
 	bool bBattleActionCompletionPending = false;
 	bool bWaitingForDeceiveCardReveal = false;
+	bool bStopAfterCurrentExecution = false;
+	int32 PendingBattleActionAppliedFXWaitCount = 0;
 	UPROPERTY(Transient)
 	TObjectPtr<UBattlePhaseTask> PhaseExecutionTask = nullptr;
 
@@ -91,16 +105,60 @@ private:
 	void PresentBattleActionTargetingResult(const FBattleAction& Action, const FTargetingResult& TargetingResult);
 	void ClearBattleActionPresentation();
 
-	void HandleBattleActionStarted(const FBattleAction& Action);
 	void HandleExecutionEntryStarted(const FBattleAction& Action, const FBattleExecutionEntry& Entry, int32 EntryIndex, const FTargetingResult& TargetingResult);
 	void HandleBattleActionCompleted();
+	void HandleBattleActionAppliedFXWaitFinished();
 
 	void SortBattleActionQueue();
 	void StartCurrentBattleAction();
 	bool ShouldRequestDeceiveCardReveal(const FBattleAction& Action) const;
 	void ExecuteCurrentBattleAction();
+	FBattleAction* FindOpponentBattleAction(const FBattleAction& CurrentAction);
 	void FinishCurrentBattleAction();
 	void StartNextBattleActionDeferred();
 	void FinishBattleActionSequence();
 	void ResetBattleActionSequence();
+	
+	//BattleAction 직전, 직후 행동(Exchange단위)--------------------------------------------------------------------------------
+public:
+	void NotifyActionGroupStartFinished();
+	
+	void NotifyActionGroupEndFinished();
+	
+	UBattleActionGroupController* GetActionGroupController() const {return ActionGroupController.Get();}
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<UBattleActionGroupController> ActionGroupController;
+	
+	void BuildCurrentActionGroup();
+
+	UPROPERTY(Transient)
+	TArray<FBattleAction> CurrentGroupActions;
+
+	int32 CurrentGroupExchangeIndex = INDEX_NONE;
+	bool bWaitingForActionGroupStart = false;
+
+private:
+	bool bWaitingForActionGroupEnd = false;
+	
+	//------------------------------------------------------------------------------------------------------------------
+	
+	//BattleAction 직전 행동(카메라, Enemy Cost 등등)----------------------------------------------------------------------
+public:
+	void NotifyBattleActionPresentationFinished();
+	
+	UPROPERTY(BlueprintAssignable, Category = "Battle|Presentation")
+	FOnBattleActionPresentationRequested BattleActionPresentationRequestedDelegate;
+	
+	UBattleActionPresenter* GetActionPresenter() const{ return ActionPresenter.Get(); }
+private:
+	void StartCurrentBattleActionPresentation();
+	bool bWaitingForBattleActionPresentation = false;
+	
+	UPROPERTY(Transient)
+	TObjectPtr<UBattleActionPresenter> ActionPresenter = nullptr;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Presentation", meta = (AllowPrivateAccess = "true"))
+	TSubclassOf<ABattleSkillInfoActor> SkillInfoActorClass;
+	//------------------------------------------------------------------------------------------------------------------
 };

@@ -1,9 +1,7 @@
 #include "Muksi/Contents/Battle/Simulation/World/BattleSimulationWorldRuntime.h"
 
-#include "Materials/MaterialInterface.h"
 #include "Muksi/Contents/Battle/BattleManager.h"
 #include "Muksi/Contents/Battle/Character/BattleCharacterBase.h"
-#include "Muksi/Contents/Battle/Character/BattleCharacter_Player.h"
 #include "Muksi/Contents/Battle/Data/MuksiBattleCardDataAsset.h"
 #include "Muksi/Contents/Battle/Grid/BattleGridManager.h"
 #include "Muksi/Contents/Battle/Sequence/Runtime/BattleActionExecutor.h"
@@ -57,8 +55,7 @@ bool UBattleSimulationWorldRuntime::ResetFromActualBattleState(const TArray<ABat
 			SimulationState = EBattleSimulationState::Idle;
 			return false;
 		}
-		UMaterialInterface* TeamMaterial = SourceCharacter->IsA<ABattleCharacter_Player>() ? SimulationManager->GetPlayerSimulationMaterial() : SimulationManager->GetEnemySimulationMaterial();
-		SimulationCharacter->InitializeFromCharacter(SourceCharacter, TeamMaterial);
+		SimulationCharacter->InitializeFromCharacter(SourceCharacter, BattleSimulationWorld::UsesFullCharacterPresentation(WorldType));
 	}
 	if (!ResetGridStateFromActual())
 	{
@@ -119,8 +116,9 @@ bool UBattleSimulationWorldRuntime::ExecuteCurrentExchange()
 	if (SimulationState != EBattleSimulationState::Prepared)
 		return false;
 
-	const bool bPlayerFirst = PreparedPlayerAction.Speed >= PreparedEnemyAction.Speed;
-	const FBattleAction& FirstAction = bPlayerFirst ? PreparedPlayerAction : PreparedEnemyAction;
+	const bool bPlayerFirst = PreparedPlayerAction.IsHigherPriorityThan(PreparedEnemyAction);
+	FBattleAction& FirstAction = bPlayerFirst ? PreparedPlayerAction : PreparedEnemyAction;
+
 	SimulationState = EBattleSimulationState::ExecutingFirstAction;
 
 	if (ActionExecutor && ActionExecutor->ExecuteBattleAction(FirstAction))
@@ -184,8 +182,7 @@ bool UBattleSimulationWorldRuntime::CreateSimulationCharacters(const TArray<ABat
 
 		if (!SimulationCharacter) 
 			return false;
-		UMaterialInterface* TeamMaterial = SourceCharacter->IsA<ABattleCharacter_Player>() ? SimulationManager->GetPlayerSimulationMaterial() : SimulationManager->GetEnemySimulationMaterial();
-		SimulationCharacter->InitializeFromCharacter(SourceCharacter, TeamMaterial);
+		SimulationCharacter->InitializeFromCharacter(SourceCharacter, BattleSimulationWorld::UsesFullCharacterPresentation(WorldType));
 		SimulationCharacterMap.Add(SourceCharacter, SimulationCharacter);
 	}
 	return SimulationCharacterMap.Num() == SourceCharacters.Num();
@@ -219,6 +216,16 @@ bool UBattleSimulationWorldRuntime::BuildSimulationAction(const FBattleAction& A
 		return false;
 	OutAction = Action;
 	OutAction.Attacker = SimulationAttacker;
+
+	UMuksiBattleCardDataAsset* ExecutionCard = Action.Card.Get();
+	UMuksiBattleCardDataAsset* ActualCard = Action.Card->GetDeceivedCard();
+	if (IsValid(ActualCard))
+		ExecutionCard = ActualCard;
+	
+	OutAction.ExecutionEntries = ExecutionCard->MainExecutionEntries;
+	OutAction.ExecutionNotifies = ExecutionCard->ExecutionNotifies;
+	OutAction.bStatusEffectEditLocked = false;
+
 	return true;
 }
 
@@ -234,8 +241,9 @@ void UBattleSimulationWorldRuntime::HandleSimulationActionFinished()
 {
 	if (SimulationState == EBattleSimulationState::ExecutingFirstAction)
 	{
-		const bool bPlayerFirst = PreparedPlayerAction.Speed >= PreparedEnemyAction.Speed;
-		const FBattleAction& SecondAction = bPlayerFirst ? PreparedEnemyAction : PreparedPlayerAction;
+		const bool bPlayerFirst = PreparedPlayerAction.IsHigherPriorityThan(PreparedEnemyAction);
+		FBattleAction& SecondAction = bPlayerFirst ? PreparedEnemyAction : PreparedPlayerAction;
+
 		SimulationState = EBattleSimulationState::ExecutingSecondAction;
 
 		if (!ActionExecutor || !ActionExecutor->ExecuteBattleAction(SecondAction))

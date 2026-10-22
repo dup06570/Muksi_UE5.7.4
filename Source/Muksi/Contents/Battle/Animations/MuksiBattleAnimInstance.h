@@ -5,6 +5,14 @@
 #include "MuksiTypes/MuksiWeaponTypes.h"
 #include "MuksiBattleAnimInstance.generated.h"
 
+UENUM(BlueprintType)
+enum class EMuksiBattleCharacterState : uint8
+{
+	Idle,
+	Counter,
+	Die
+};
+
 UCLASS()
 class MUKSI_API UMuksiBattleAnimInstance : public UAnimInstance
 {
@@ -13,4 +21,7 @@ class MUKSI_API UMuksiBattleAnimInstance : public UAnimInstance
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle Animation")
 	EMuksiWeaponTypes CurrentWeaponType = EMuksiWeaponTypes::None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle Animation")
+	EMuksiBattleCharacterState CharacterState = EMuksiBattleCharacterState::Idle;
 };

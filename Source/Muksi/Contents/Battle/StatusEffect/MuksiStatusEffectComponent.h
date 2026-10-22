@@ -8,6 +8,7 @@
 class ABattleManager;
 class UMuksiStatusEffect;
 class UBattleExecutionRunner;
+class UStatusEffectDefinitionDataAsset;
 struct FBattleAction;
 struct FBattleExecutionContext;
 struct FBattleExecutionEntry;
@@ -27,7 +28,6 @@ public:
 
 public:
     void Initialize(ABattleManager* InBattleManager);
-    void CopyRuntimeStateFrom(const UMuksiStatusEffectComponent& SourceComponent);
 	void ResetRuntimeState();
 
     UFUNCTION(BlueprintCallable)
@@ -43,11 +43,14 @@ public:
     UMuksiStatusEffect* FindEffectByID(FName EffectID) const;
     int32 GetEffectStackCount(FName EffectID) const;
     const TArray<TObjectPtr<UMuksiStatusEffect>>& GetActiveEffects() const;
-	void AppendBattleActionStartExecutionEntries(const FBattleAction& BattleAction, TArray<FBattleExecutionEntry>& OutExecutionEntries) const;
+    UStatusEffectDefinitionDataAsset* FindStatusEffectDefinition(FName EffectID) const;
 	void AppendHitDealtExecutionEntries(const FBattleExecutionContext& Context, int32 Damage, TArray<FBattleExecutionEntry>& OutExecutionEntries) const;
 	void AppendHitReceivedExecutionEntries(const FBattleExecutionContext& Context, int32 Damage, TArray<FBattleExecutionEntry>& OutExecutionEntries) const;
+	int32 ApplyIncomingDamageModifiers(int32 Damage, FName& OutHitReactionAnimKey);
 
     void ExecuteSequentially(EBattlePhase OldPhase, EBattlePhase NewPhase, FSimpleDelegate CompletionDelegate);
+	void BeginAppliedFXWait(FSimpleDelegate CompletionDelegate);
+	void EndAppliedFXWait();
 
 protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -59,8 +62,18 @@ private:
     UPROPERTY(Transient)
     TObjectPtr<ABattleManager> BattleManager = nullptr;
 
-    void RemoveExpiredEffects();
+    bool RemoveExpiredEffects(bool bNotify = true);
     void RemoveStatusEffect(UMuksiStatusEffect* Effect);
+	void HandleBattleActionStarted(FBattleAction& CurrentAction, FBattleAction& OpponentAction);
+	void HandleBattleActionCompleted(const FBattleAction& CompletedAction);
+	void HandleBattleExchangeCompleted(int32 ExchangeIndex);
+	void ApplyStatusEffectToCurrentBattleAction(UMuksiStatusEffect* Effect);
+	void PlayAppliedStatusEffectFX(const UStatusEffectDefinitionDataAsset* EffectDefinition);
+	void StartStatusEffectAuraFX(const UStatusEffectDefinitionDataAsset* EffectDefinition);
+	void StopStatusEffectAuraFX(FName EffectID);
+	void HandleAppliedStatusEffectFXFinished();
+	void TryFinishAppliedFXWait();
+	void CancelAppliedFXWait();
     void ExecuteNextStatusEffect();
     void RunPhaseExecutionEntries(const TArray<FBattleExecutionEntry>& ExecutionEntries);
     void HandlePhaseExecutionRunnerFinished(UBattleExecutionRunner* FinishedRunner);
@@ -73,8 +86,12 @@ private:
 	TObjectPtr<UBattleExecutionRunner> PhaseExecutionRunner = nullptr;
 
     FSimpleDelegate ExecutionCompletionDelegate;
+	FSimpleDelegate AppliedFXWaitCompletionDelegate;
     EBattlePhase ExecutingOldPhase = EBattlePhase::None;
     EBattlePhase ExecutingNewPhase = EBattlePhase::None;
     int32 ExecutionIndex = INDEX_NONE;
+    int32 PendingAppliedFXCount = 0;
     bool bExecuting = false;
+	bool bAppliedFXWaitActive = false;
+	bool bAppliedFXWaitSealed = false;
 };

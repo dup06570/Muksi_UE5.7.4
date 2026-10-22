@@ -7,31 +7,87 @@
 void UStatusEffectExecution::Execute(const FBattleExecutionContext& Context, FBattleExecutionFinished OnFinished)
 {
 	const FStatusEffectExecutionData* StatusEffectData = Context.GetExecutionData<FStatusEffectExecutionData>();
-	ABattleCharacterBase* TargetCharacter = Context.ExecutionTarget ? Context.ExecutionTarget.Get() : Context.Attacker.Get();
-	UMuksiStatusEffectComponent* StatusEffectComponent = TargetCharacter ? TargetCharacter->GetStatusEffectComponent() : nullptr;
 
-	if (!StatusEffectData || StatusEffectData->EffectID.IsNone() || !StatusEffectComponent || Context.ExecutionMode != EBattleExecutionMode::ActualBattle)
+	if (!StatusEffectData || StatusEffectData->EffectID.IsNone())
 	{
 		FinishExecution(OnFinished);
 		return;
 	}
 
-	switch (StatusEffectData->Operation)
+	if (Context.ExecutionMode == EBattleExecutionMode::Simulation)
 	{
-	case EStatusEffectExecutionOperation::Add:
-		StatusEffectComponent->AddStatusEffect(StatusEffectData->EffectID, StatusEffectData->StackCount, StatusEffectData->Duration);
-		break;
-	case EStatusEffectExecutionOperation::Subtract:
-		StatusEffectComponent->SubtractStatusEffect(StatusEffectData->EffectID, StatusEffectData->StackCount, StatusEffectData->Duration);
-		break;
-	case EStatusEffectExecutionOperation::Remove:
-		StatusEffectComponent->RemoveStatusEffectByID(StatusEffectData->EffectID);
-		break;
+		FinishExecution(OnFinished);
+		return;
+	}
+
+	TArray<ABattleCharacterBase*> TargetCharacters;
+	CollectTargets(Context, *StatusEffectData, TargetCharacters);
+
+	for (ABattleCharacterBase* TargetCharacter : TargetCharacters)
+		ApplyStatusEffectToTarget(*StatusEffectData, TargetCharacter);
+
+	FinishExecution(OnFinished);
+}
+
+void UStatusEffectExecution::CollectTargets(const FBattleExecutionContext& Context, const FStatusEffectExecutionData& StatusEffectData, TArray<ABattleCharacterBase*>& OutTargets) const
+{
+	OutTargets.Reset();
+
+	switch (StatusEffectData.TargetPolicy)
+	{
+	case EBattleExecutionTargetPolicy::ExecutionTarget:
+		if (Context.ExecutionTarget)
+			OutTargets.Add(Context.ExecutionTarget);
+		return;
+	case EBattleExecutionTargetPolicy::Attacker:
+		if (Context.Attacker)
+			OutTargets.Add(Context.Attacker);
+		return;
+	case EBattleExecutionTargetPolicy::TargetingResult:
 	default:
 		break;
 	}
 
-	FinishExecution(OnFinished);
+	const FTargetingStepResult* StepResult = Context.GetLastTargetingStepResult();
+
+	if (!StepResult)
+		return;
+
+	for (ABattleCharacterBase* TargetCharacter : StepResult->GetAllTargets())
+	{
+		if (TargetCharacter)
+			OutTargets.AddUnique(TargetCharacter);
+	}
+}
+
+void UStatusEffectExecution::ApplyStatusEffectToTarget(const FStatusEffectExecutionData& StatusEffectData, ABattleCharacterBase* TargetCharacter) const
+{
+	if (!TargetCharacter)
+		return;
+
+	UMuksiStatusEffectComponent* StatusEffectComponent = TargetCharacter->GetStatusEffectComponent();
+
+	if (!StatusEffectComponent)
+		return;
+
+	switch (StatusEffectData.Operation)
+	{
+	case EStatusEffectExecutionOperation::Add:
+		StatusEffectComponent->AddStatusEffect(StatusEffectData.EffectID, StatusEffectData.StackCount, StatusEffectData.Duration);
+		break;
+	case EStatusEffectExecutionOperation::Subtract:
+		StatusEffectComponent->SubtractStatusEffect(StatusEffectData.EffectID, StatusEffectData.StackCount, StatusEffectData.Duration);
+		break;
+	case EStatusEffectExecutionOperation::Remove:
+		StatusEffectComponent->RemoveStatusEffectByID(StatusEffectData.EffectID);
+		break;
+	case EStatusEffectExecutionOperation::RemoveAndAdd:
+		StatusEffectComponent->RemoveStatusEffectByID(StatusEffectData.EffectID);
+		StatusEffectComponent->AddStatusEffect(StatusEffectData.EffectID, StatusEffectData.StackCount, StatusEffectData.Duration);
+		break;
+	default:
+		break;
+	}
 }
 
 const UScriptStruct* UStatusEffectExecution::GetExecutionDataStruct() const

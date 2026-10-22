@@ -8,9 +8,11 @@
 #include "Muksi/Contents/Battle/Character/BattleStatComponent.h"
 #include "Muksi/Contents/Battle/Data/MuksiCharacterDataAsset.h"
 #include "Muksi/Contents/Battle/Grid/BattleGridManager.h"
+#include "Muksi/Contents/Battle/Movement/MuksiBattleMovementComponent.h"
 #include "Muksi/Contents/Battle/Flow/BattlePhaseTask.h"
 #include "Muksi/Contents/Battle/Runtime/BattleRuntimeContext.h"
-#include "Muksi/Save/BattleEncounterSubsystem.h"
+#include "Muksi/Contents/Battle/Setup/AssetPreload/BattleAssetPreloadManager.h"
+#include "Muksi/Contents/Battle/Encounter/BattleEncounterSubsystem.h"
 
 ABattleSetupManager::ABattleSetupManager()
 {
@@ -28,6 +30,10 @@ void ABattleSetupManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
     if (BattleManager)
         BattleManager->PhaseEntryRequestedDelegate.RemoveDynamic(this, &ABattleSetupManager::HandlePhaseEntryRequested);
 
+    if (AssetPreloadManager)
+        AssetPreloadManager->ReleaseLoadedAssets();
+
+    AssetPreloadManager = nullptr;
     BattleGridManager = nullptr;
     BattleManager = nullptr;
 
@@ -41,13 +47,18 @@ bool ABattleSetupManager::InitializeBattleFlow(ABattleManager* InBattleManager, 
 
     BattleManager = InBattleManager;
     BattleGridManager = InBattleGridManager;
+    AssetPreloadManager = NewObject<UBattleAssetPreloadManager>(this);
+
+    if (!AssetPreloadManager || !AssetPreloadManager->Initialize(BattleManager, RenderPreparationTimeoutSeconds))
+        return false;
+
     BattleManager->PhaseEntryRequestedDelegate.AddUniqueDynamic(this, &ABattleSetupManager::HandlePhaseEntryRequested);
     return true;
 }
 
 bool ABattleSetupManager::ShouldHandlePhaseEntry(EBattlePhase Phase) const
 {
-    return Phase == EBattlePhase::ReadyStart || Phase == EBattlePhase::ReadyEnd;
+    return Phase == EBattlePhase::ReadyStart || Phase == EBattlePhase::ReadyEnd || Phase == EBattlePhase::BattleEnd;
 }
 
 void ABattleSetupManager::HandlePhaseEntryRequested(EBattlePhase OldPhase, EBattlePhase NewPhase, UBattlePhaseTaskContext* TaskContext)
@@ -71,21 +82,30 @@ void ABattleSetupManager::HandlePhaseEntryRequested(EBattlePhase OldPhase, EBatt
     switch (NewPhase)
     {
     case EBattlePhase::ReadyStart:
-        PrepareReadyData();
-        break;
+        if (!PrepareReadyData(Task))
+            Task->Complete();
+
+        return;
 
     case EBattlePhase::ReadyEnd:
         PrepareReadyEnd();
-        break;
+        Task->Complete();
+        return;
+
+    case EBattlePhase::BattleEnd:
+        if (AssetPreloadManager)
+            AssetPreloadManager->ReleaseLoadedAssets();
+
+        Task->Complete();
+        return;
 
     default:
-        break;
+        Task->Complete();
+        return;
     }
-
-    Task->Complete();
 }
 
-bool ABattleSetupManager::PrepareReadyData()
+bool ABattleSetupManager::PrepareReadyData(UBattlePhaseTask* Task)
 {
     LoadEncounterEnemyCharacterData();
 
@@ -98,6 +118,27 @@ bool ABattleSetupManager::PrepareReadyData()
     if (!IsValid(EnemyCharacterDataAsset))
     {
         UE_LOG(LogTemp, Error, TEXT("[BattleSetupManager] Enemy character data is invalid."));
+        return false;
+    }
+
+    if (!AssetPreloadManager || !IsValid(Task))
+        return false;
+
+    TWeakObjectPtr<ABattleSetupManager> WeakThis(this);
+    TWeakObjectPtr<UBattlePhaseTask> WeakTask(Task);
+
+    const bool bPreloadStarted = AssetPreloadManager->LoadAssetsForBattle(PlayerCharacterDataAsset, EnemyCharacterDataAsset, [WeakThis, WeakTask](bool bSuccess)
+    {
+        if (!bSuccess && WeakThis.IsValid())
+            UE_LOG(LogTemp, Error, TEXT("[BattleSetupManager] Failed to preload battle assets."));
+
+        if (WeakTask.IsValid())
+            WeakTask->Complete();
+    });
+
+    if (!bPreloadStarted)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[BattleSetupManager] Failed to start battle asset preload."));
         return false;
     }
 
@@ -195,8 +236,47 @@ bool ABattleSetupManager::CreateBattleCharacters()
 
     BattleGridManager->PlaceCharacter(EBattleSimulationWorldType::PlayerActualEnemyActual, PlayerCharacter, StartPlayerCoord);
     BattleGridManager->PlaceCharacter(EBattleSimulationWorldType::PlayerActualEnemyActual, EnemyCharacter, StartEnemyCoord);
+
+    // PlaceCharacter() applies the tile spawn transform, including its rotation.
+    // Face the combatants only after both final world positions are established.
+    FaceCharactersTowardEachOther(PlayerCharacter, EnemyCharacter);
+
     RuntimeContext->SetBattleCharacters(PlayerCharacter, EnemyCharacter);
     return true;
+}
+
+void ABattleSetupManager::FaceCharactersTowardEachOther(ABattleCharacterBase* PlayerCharacter, ABattleCharacterBase* EnemyCharacter) const
+{
+    if (!IsValid(PlayerCharacter) || !IsValid(EnemyCharacter))
+    {
+        return;
+    }
+
+    FVector PlayerToEnemy = EnemyCharacter->GetActorLocation() - PlayerCharacter->GetActorLocation();
+
+    // Characters should only turn on the ground plane.
+    // Ignoring Z prevents small terrain-height differences from introducing pitch.
+    PlayerToEnemy.Z = 0.0f;
+
+    if (PlayerToEnemy.IsNearlyZero())
+    {
+        return;
+    }
+
+    const UMuksiBattleMovementComponent* PlayerMovement = PlayerCharacter->GetBattleMovementComponent();
+    const UMuksiBattleMovementComponent* EnemyMovement = EnemyCharacter->GetBattleMovementComponent();
+
+    // Keep initial facing consistent with the rotation/movement system.
+    // Character meshes can have their own forward-axis correction (for example -90 degrees),
+    // so apply the same MovementYawOffset used by UMuksiBattleMovementComponent.
+    const float PlayerYawOffset = IsValid(PlayerMovement) ? PlayerMovement->MovementYawOffset : 0.0f;
+    const float EnemyYawOffset = IsValid(EnemyMovement) ? EnemyMovement->MovementYawOffset : 0.0f;
+
+    const float PlayerYaw = PlayerToEnemy.Rotation().Yaw + PlayerYawOffset;
+    const float EnemyYaw = (-PlayerToEnemy).Rotation().Yaw + EnemyYawOffset;
+
+    PlayerCharacter->SetActorRotation(FRotator(0.0f, PlayerYaw, 0.0f));
+    EnemyCharacter->SetActorRotation(FRotator(0.0f, EnemyYaw, 0.0f));
 }
 
 void ABattleSetupManager::BindBattleEndEvents()
@@ -255,10 +335,6 @@ void ABattleSetupManager::UnbindBattleEndEvents()
 
 void ABattleSetupManager::HandleBattleCharacterDead(ABattleCharacterBase* DeadCharacter)
 {
-    (void)DeadCharacter;
-
     if (BattleManager)
-    {
-        BattleManager->NotifyBattleCharacterDead();
-    }
+        BattleManager->NotifyBattleCharacterDead(DeadCharacter);
 }

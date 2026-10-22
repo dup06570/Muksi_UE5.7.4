@@ -7,6 +7,7 @@
 #include "UObject/Object.h"
 #include "BattleCardManager.generated.h"
 
+struct FBattleAction;
 class UBattlePhaseTaskContext;
 enum class EBattlePhase : uint8;
 class ABattleManager;
@@ -16,15 +17,16 @@ class UMuksiBattleCardDataAsset;
 
 struct FCharacterPanicTimeoutResult
 {
-	FBattleCardInstance PanicCard;
-	FBattleCardInstance DiscardedCard;
+	TObjectPtr<UMuksiBattleCardDataAsset> PanicCard = nullptr;
 
-	bool bDiscardedCard = false;
-	
-	FBattleCardInstance ReturnedCard;
-	bool bReturnedCard = false;
+	bool IsValid() const
+	{
+		return PanicCard != nullptr;
+	}
 
 };
+
+
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnBattleHandCardChanged, FGuid, InstanceId, UMuksiBattleCardDataAsset*, NewCardData);
 
@@ -53,8 +55,16 @@ private:
 	
 	void HandleRoundStart();
 	void HandleRoundEnd();
+	//변초 공개 시스템----------------------------------------------------------------------------------------------------
+protected:
+	void BindDeceiveCardRevealEvent();
+	void HandleDeceiveCardRevealRequested(const FBattleAction& BattleAction);
 	
-	//카드 변경 시스템----------------------------------------------------------
+	
+	//------------------------------------------------------------------------------------------------------------------
+	
+	
+	//카드 변경 시스템----------------------------------------------------------------------------------------------------
 public:
 	UPROPERTY(BlueprintAssignable)
 	FOnBattleHandCardChanged OnBattleHandCardChanged;
@@ -69,7 +79,7 @@ public:
 	//카드 선택 시간초과 시스템-------------------------------------------------------
 public:
 	bool ResolvePlayerPanicOnTimeout(int32 ExchangeIndex, FCharacterPanicTimeoutResult& OutResult);
-	bool ResolveEnemyPanicOnTimeout(int32 ExchangeIndex, FCharacterPanicTimeoutResult& OutResult);
+	bool ResolveEnemyPanicOnTimeout(int32 ExchangeIndex,FCharacterPanicTimeoutResult& OutResult);
 private:
 	bool ResolveCharacterPanicOnTimeout(ABattleCharacterBase* Character, int32 ExchangeIndex, FCharacterPanicTimeoutResult& OutResult);
 	//----------------------------------------------------------------------------

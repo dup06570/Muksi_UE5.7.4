@@ -12,17 +12,26 @@ void UKnockbackExecution::Execute(const FBattleExecutionContext& Context, FBattl
 	CachedOnFinished = MoveTemp(OnFinished);
 	CachedGridManager = Context.BattleGridManager;
 	GridWorldType = Context.GridWorldType;
-	KnockbackTarget = Context.ExecutionTarget;
 	StartCoord = FHexOffsetCoord();
 	DestinationCoord = FHexOffsetCoord();
 
 	const FKnockbackExecutionData* KnockbackData = Context.GetExecutionData<FKnockbackExecutionData>();
 
-	if (!KnockbackData || !Context.Attacker || !KnockbackTarget || !CachedGridManager || KnockbackData->Range <= 0 || KnockbackData->MoveSpeed <= KINDA_SMALL_NUMBER)
+	if (!KnockbackData || !Context.Attacker || !CachedGridManager || KnockbackData->Range <= 0 || KnockbackData->MoveSpeed <= KINDA_SMALL_NUMBER)
 	{
 		CompleteExecution();
 		return;
 	}
+
+	KnockbackTarget = ResolveKnockbackTarget(Context, KnockbackData->TargetPolicy);
+
+	if (!KnockbackTarget)
+	{
+		CompleteExecution();
+		return;
+	}
+
+	StartRotation = KnockbackTarget->GetActorQuat();
 
 	UBattleGridNavigationComponent* NavigationComponent = CachedGridManager->GetNavigationComponent();
 	UMuksiBattleMovementComponent* MovementComponent = KnockbackTarget->FindComponentByClass<UMuksiBattleMovementComponent>();
@@ -98,6 +107,35 @@ void UKnockbackExecution::Execute(const FBattleExecutionContext& Context, FBattl
 const UScriptStruct* UKnockbackExecution::GetExecutionDataStruct() const
 {
 	return FKnockbackExecutionData::StaticStruct();
+}
+
+ABattleCharacterBase* UKnockbackExecution::ResolveKnockbackTarget(const FBattleExecutionContext& Context, EBattleExecutionTargetPolicy TargetPolicy) const
+{
+	switch (TargetPolicy)
+	{
+	case EBattleExecutionTargetPolicy::ExecutionTarget:
+		return Context.ExecutionTarget;
+
+	case EBattleExecutionTargetPolicy::Attacker:
+		return Context.Attacker;
+
+	case EBattleExecutionTargetPolicy::TargetingResult:
+	default:
+		break;
+	}
+
+	const FTargetingStepResult* StepResult = Context.GetLastTargetingStepResult();
+
+	if (!StepResult)
+		return nullptr;
+
+	for (ABattleCharacterBase* TargetCharacter : StepResult->GetAllTargets())
+	{
+		if (IsValid(TargetCharacter) && TargetCharacter != Context.Attacker)
+			return TargetCharacter;
+	}
+
+	return nullptr;
 }
 
 bool UKnockbackExecution::FindActorGridCoord(ABattleGridManager* GridManager, const AActor* Actor, FHexOffsetCoord& OutCoord)
@@ -188,8 +226,10 @@ void UKnockbackExecution::HandleMovementFinished(bool bInterrupted)
 
 	if (bInterrupted)
 	{
-		// Grid 상태는 아직 StartCoord 그대로이므로 월드 위치만 원위치로 복구한다.
-		KnockbackTarget->SetActorTransform(CachedGridManager->GetTransformToPosition(StartCoord));
+		// Grid 상태는 아직 StartCoord 그대로이므로 시작 위치/회전으로 복구한다.
+		const FTransform StartTransform = CachedGridManager->GetTransformToPosition(StartCoord);
+		KnockbackTarget->SetActorLocation(StartTransform.GetLocation());
+		KnockbackTarget->SetActorRotation(StartRotation);
 		CompleteExecution();
 		return;
 	}
@@ -200,12 +240,16 @@ void UKnockbackExecution::HandleMovementFinished(bool bInterrupted)
 	Request.WorldType = GridWorldType;
 	Request.FromCoord = StartCoord;
 	Request.ToCoord = DestinationCoord;
+	Request.MoveType = EBattleGridMoveType::Knockback;
 	Request.bSnapActorToGrid = true;
+	Request.bPreserveActorRotation = true;
 	if (!CachedGridManager->ExecuteGridMove(Request).bSucceeded)
 	{
 		// 예상치 못한 점유 충돌이 발생하면 논리 상태는 StartCoord에 남아 있으므로
-		// 시각 위치도 시작 지점으로 복구한다.
-		KnockbackTarget->SetActorTransform(CachedGridManager->GetTransformToPosition(StartCoord));
+		// 시각 위치와 Knockback 시작 시점의 회전을 복구한다.
+		const FTransform StartTransform = CachedGridManager->GetTransformToPosition(StartCoord);
+		KnockbackTarget->SetActorLocation(StartTransform.GetLocation());
+		KnockbackTarget->SetActorRotation(StartRotation);
 	}
 
 	CompleteExecution();
@@ -222,6 +266,7 @@ void UKnockbackExecution::CompleteExecution()
 	KnockbackTarget = nullptr;
 	StartCoord = FHexOffsetCoord();
 	DestinationCoord = FHexOffsetCoord();
+	StartRotation = FQuat::Identity;
 	GridWorldType = EBattleSimulationWorldType::PlayerActualEnemyActual;
 
 	FinishExecution(CachedOnFinished);

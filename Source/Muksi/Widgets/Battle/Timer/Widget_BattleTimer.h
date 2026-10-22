@@ -11,6 +11,7 @@ class UTextBlock;
 class UCanvasPanel;
 class UImage;
 class UWidgetAnimation;
+class UMaterialInstanceDynamic;
 
 /**
  * 
@@ -38,32 +39,33 @@ public:
 	//시간 종료 연출
 	UFUNCTION(BlueprintCallable, Category = "Battle|Timer")
 	void ExpireTimer();
-	
-	UFUNCTION(BlueprintCallable, Category = "Battle|Timer")
-	void HideTimer();
+
 
 protected:
 	//*** BindWidget
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UProgressBar> TimerProgressBar = nullptr;
-
-	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UTextBlock> RemainingTimeText = nullptr;
+	
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UProgressBar> ProgressBar_Timer = nullptr;
 
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UImage> RopeBackgroundImage = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Timer|Progress")
+	FLinearColor ProgressStartColor = FLinearColor(0.15f, 0.65f, 1.0f, 1.0f);
 
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UImage> RopeBurnImage = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Timer|Progress")
+	FLinearColor ProgressEndColor = FLinearColor(1.0f, 0.08f, 0.05f, 1.0f);
 	//*** BindWidget
-
-	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
-	TObjectPtr<UWidgetAnimation> WarningAnimation = nullptr;
-
-	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
-	TObjectPtr<UWidgetAnimation> ExpiredAnimation = nullptr;
 
 private:
 	float CurrentTotalDuration = 0.0f;
 	float CurrentWarningTime = 0.0f;
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> TimerMaterial = nullptr;
+
+	// Material의 Min 최대값
+	UPROPERTY(EditAnywhere, Category = "Battle|Timer|Material")
+	float MaxMinValue = 0.7f;
+	
 };

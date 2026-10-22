@@ -5,10 +5,9 @@
 #include "Muksi/Contents/Battle/Data/MuksiBattleCardDataAsset.h"
 #include "Muksi/Contents/Battle/Execution/Core/BattleExecutionRunner.h"
 #include "Muksi/Contents/Battle/Grid/BattleGridManager.h"
-#include "Muksi/Contents/Battle/StatusEffect/MuksiStatusEffectComponent.h"
+#include "Muksi/Contents/Battle/Movement/MuksiBattleMovementComponent.h"
 #include "Muksi/Contents/Battle/Targeting/CardData/TargetingCardData.h"
 #include "Muksi/Contents/Battle/Targeting/Context/TargetingStep.h"
-#include "Muksi/Contents/Battle/Targeting/Pattern/AreaPattern.h"
 #include "Muksi/Contents/Battle/Targeting/Resolver/BattleTargetResolver.h"
 
 bool UBattleActionExecutor::Initialize(ABattleGridManager* InGridManager, EBattleSimulationWorldType InGridWorldType)
@@ -26,7 +25,7 @@ bool UBattleActionExecutor::ExecuteBattleAction(const FBattleAction& Action)
 		return false;
 
 	UMuksiBattleCardDataAsset* ExecutionCard = ResolveExecutionCard(Action);
-	if (!IsValid(ExecutionCard) || ExecutionCard->MainExecutionEntries.IsEmpty())
+	if (!IsValid(ExecutionCard) || Action.ExecutionEntries.IsEmpty())
 		return false;
 
 	FTargetingResult TargetingResult;
@@ -36,16 +35,16 @@ bool UBattleActionExecutor::ExecuteBattleAction(const FBattleAction& Action)
 	CurrentAction = Action;
 	CurrentExecutionCard = ExecutionCard;
 	ActionTargetingResult = MoveTemp(TargetingResult);
+	PresentationCharacters = MakeShared<TArray<TWeakObjectPtr<ABattleCharacterBase>>>();
 	bRunning = true;
+	bStopAfterCurrentExecution = false;
 	ActiveExecutionRunners.Reset();
 
-	if (!BindAttackerNotify())
+	if (!BindExecutionNotifySources())
 	{
 		ResetRuntime();
 		return false;
 	}
-
-	OnBattleActionStarted.ExecuteIfBound(CurrentAction);
 
 	if (!RunMainExecutionEntries())
 	{
@@ -53,6 +52,21 @@ bool UBattleActionExecutor::ExecuteBattleAction(const FBattleAction& Action)
 		return false;
 	}
 	return true;
+}
+
+void UBattleActionExecutor::StopAfterCurrentExecution()
+{
+	if (!bRunning || bStopAfterCurrentExecution)
+		return;
+
+	bStopAfterCurrentExecution = true;
+	UnbindExecutionNotifySources();
+
+	for (UBattleExecutionRunner* Runner : ActiveExecutionRunners)
+	{
+		if (Runner)
+			Runner->StopAfterCurrentExecution();
+	}
 }
 
 void UBattleActionExecutor::Stop()
@@ -65,47 +79,30 @@ void UBattleActionExecutor::Stop()
 bool UBattleActionExecutor::ResolveActionTargetingResult(const FBattleAction& Action, FTargetingResult& OutTargetingResult) const
 {
 	OutTargetingResult.Reset();
+
 	const FTargetingCardData& TargetingData = Action.Card->TargetingData;
 	TArray<FTargetingStep> ResolvedSteps;
+
 	if (!FBattleTargetResolver::ResolveIntent(Action.Attacker.Get(), GridManager, GridWorldType, TargetingData, Action.TargetingIntent, ResolvedSteps))
 		return false;
 
 	OutTargetingResult.Steps.Reserve(ResolvedSteps.Num());
+
 	for (int32 StepIndex = 0; StepIndex < ResolvedSteps.Num(); ++StepIndex)
 	{
 		const FTargetingStepCardData* StepData = TargetingData.GetStep(StepIndex);
+
 		if (!StepData)
 			return false;
 
 		FTargetingStepResult StepResult;
-		StepResult.Step = ResolvedSteps[StepIndex];
-		if (!StepResult.Step.HasTargetCoord())
+
+		if (!FBattleTargetResolver::BuildStepResult(GridManager, GridWorldType, *StepData, ResolvedSteps[StepIndex], StepResult))
 			return false;
 
-		if (!StepData->Pattern.PatternClass)
-		{
-			StepResult.AffectedCoords.Add(StepResult.Step.TargetCoord);
-		}
-		else
-		{
-			const UAreaPattern* Pattern = StepData->Pattern.PatternClass->GetDefaultObject<UAreaPattern>();
-			if (!Pattern)
-				return false;
-
-			Pattern->ApplyPattern(
-				GridManager,
-				GridWorldType,
-				StepData->Pattern.PatternData,
-				StepResult.Step.OriginCoord,
-				StepResult.Step.TargetCoord,
-				StepResult.Step.Direction,
-				StepResult.AffectedCoords,
-				StepResult.PathCoords);
-		}
-
-		GridManager->GetCharactersAtCoords(GridWorldType, StepResult.AffectedCoords, StepResult.Targets);
 		OutTargetingResult.Steps.Add(MoveTemp(StepResult));
 	}
+
 	return true;
 }
 
@@ -116,65 +113,90 @@ bool UBattleActionExecutor::ValidateAction(const FBattleAction& Action) const
 
 UMuksiBattleCardDataAsset* UBattleActionExecutor::ResolveExecutionCard(const FBattleAction& Action) const
 {
-	if (BattleSimulationWorld::UsesActualCard(GridWorldType, Action.bPlayerAction)) return Action.Card.Get();
-	UMuksiBattleCardDataAsset* DeceivedCard = Action.Card->GetDeceivedCard();
-	return IsValid(DeceivedCard) ? DeceivedCard : Action.Card.Get();
+	if (!BattleSimulationWorld::UsesActualCard(GridWorldType, Action.bPlayerAction))
+		return Action.Card.Get();
+
+	UMuksiBattleCardDataAsset* ActualCard = Action.Card;
+	return IsValid(ActualCard) ? ActualCard : Action.Card.Get();
 }
 
-bool UBattleActionExecutor::BindAttackerNotify()
+bool UBattleActionExecutor::BindExecutionNotifySources()
 {
-	if (!CurrentExecutionCard || CurrentExecutionCard->ExecutionNotifies.IsEmpty())
-		return true;
-	if (!CurrentAction.Attacker)
-		return false;
-	AttackerAnimationComponent = CurrentAction.Attacker->FindComponentByClass<UMuksiBattleAnimationComponent>();
-	if (!AttackerAnimationComponent)
-		return false;
-	AttackerAnimationComponent->OnBattleExecutionNotify.AddUniqueDynamic(this, &UBattleActionExecutor::HandleBattleExecutionNotify);
+	NotifyAnimationComponents.Reset();
+
+	for (const FBattleExecutionNotify& ExecutionNotify : CurrentAction.ExecutionNotifies)
+	{
+		if (!ExecutionNotify.IsValid())
+			continue;
+
+		ABattleCharacterBase* NotifySource = ResolveNotifySource(ExecutionNotify);
+		if (!IsValid(NotifySource))
+			return false;
+
+		UMuksiBattleAnimationComponent* AnimationComponent = NotifySource->FindComponentByClass<UMuksiBattleAnimationComponent>();
+		if (!IsValid(AnimationComponent))
+			return false;
+
+		if (NotifyAnimationComponents.Contains(AnimationComponent))
+			continue;
+
+		AnimationComponent->OnBattleExecutionNotifyWithSourceAndAnimKey.AddUniqueDynamic(this, &UBattleActionExecutor::HandleBattleExecutionNotify);
+		NotifyAnimationComponents.Add(AnimationComponent);
+	}
+
 	return true;
 }
 
-void UBattleActionExecutor::UnbindAttackerNotify()
+void UBattleActionExecutor::UnbindExecutionNotifySources()
 {
-	if (AttackerAnimationComponent)
-		AttackerAnimationComponent->OnBattleExecutionNotify.RemoveDynamic(this, &UBattleActionExecutor::HandleBattleExecutionNotify);
+	for (UMuksiBattleAnimationComponent* AnimationComponent : NotifyAnimationComponents)
+	{
+		if (IsValid(AnimationComponent))
+			AnimationComponent->OnBattleExecutionNotifyWithSourceAndAnimKey.RemoveDynamic(this, &UBattleActionExecutor::HandleBattleExecutionNotify);
+	}
+
+	NotifyAnimationComponents.Reset();
+}
+
+ABattleCharacterBase* UBattleActionExecutor::ResolveNotifySource(const FBattleExecutionNotify& ExecutionNotify) const
+{
+	return ExecutionNotify.NotifySourceOverride
+		? ExecutionNotify.NotifySourceOverride.Get()
+		: CurrentAction.Attacker.Get();
 }
 
 bool UBattleActionExecutor::RunMainExecutionEntries()
 {
-	TArray<FBattleExecutionEntry> MainExecutionEntries;
-	if (!BattleSimulationWorld::UsesSimulationRuntime(GridWorldType) && CurrentAction.Attacker)
-	{
-		if (UMuksiStatusEffectComponent* StatusEffectComponent = CurrentAction.Attacker->GetStatusEffectComponent())
-		{
-			StatusEffectComponent->AppendBattleActionStartExecutionEntries(CurrentAction, MainExecutionEntries);
-		}
-	}
-
-	MainExecutionEntries.Append(CurrentExecutionCard->MainExecutionEntries);
+	const TArray<FBattleExecutionEntry> MainExecutionEntries = CurrentAction.ExecutionEntries;
 	return RunExecutionEntries(MainExecutionEntries);
 }
 
-void UBattleActionExecutor::HandleBattleExecutionNotify(FName NotifyKey)
+void UBattleActionExecutor::HandleBattleExecutionNotify(ABattleCharacterBase* NotifySource, FName NotifyKey, FName SourceAnimKey)
 {
-	if (bRunning && !NotifyKey.IsNone())
-		RunExecutionEntriesForNotify(NotifyKey);
+	if (bRunning && !bStopAfterCurrentExecution && IsValid(NotifySource) && !NotifyKey.IsNone())
+		RunExecutionEntriesForNotify(NotifySource, NotifyKey, SourceAnimKey);
 }
 
-void UBattleActionExecutor::RunExecutionEntriesForNotify(FName NotifyKey)
+void UBattleActionExecutor::RunExecutionEntriesForNotify(ABattleCharacterBase* NotifySource, FName NotifyKey, FName SourceAnimKey)
 {
-	if (!CurrentExecutionCard)
-		return;
-	for (const FBattleExecutionNotify& ExecutionNotify : CurrentExecutionCard->ExecutionNotifies)
+	for (const FBattleExecutionNotify& ExecutionNotify : CurrentAction.ExecutionNotifies)
 	{
-		if (ExecutionNotify.IsValid() && ExecutionNotify.NotifyKey == NotifyKey) 
-			RunExecutionEntries(ExecutionNotify.ExecutionEntries);
+		if (!ExecutionNotify.IsValid() || ExecutionNotify.NotifyKey != NotifyKey)
+			continue;
+
+		if (ResolveNotifySource(ExecutionNotify) != NotifySource)
+			continue;
+
+		if (!ExecutionNotify.SourceAnimKey.IsNone() && ExecutionNotify.SourceAnimKey != SourceAnimKey)
+			continue;
+
+		RunExecutionEntries(ExecutionNotify.ExecutionEntries, NotifySource);
 	}
 }
 
-bool UBattleActionExecutor::RunExecutionEntries(const TArray<FBattleExecutionEntry>& ExecutionEntries)
+bool UBattleActionExecutor::RunExecutionEntries(const TArray<FBattleExecutionEntry>& ExecutionEntries, ABattleCharacterBase* ExecutionSource)
 {
-	if (!bRunning || ExecutionEntries.IsEmpty())
+	if (!bRunning || bStopAfterCurrentExecution || ExecutionEntries.IsEmpty())
 		return false;
 
 	UBattleExecutionRunner* Runner = NewObject<UBattleExecutionRunner>(this);
@@ -182,12 +204,13 @@ bool UBattleActionExecutor::RunExecutionEntries(const TArray<FBattleExecutionEnt
 		return false;
 
 	FBattleExecutionContext Context;
-	Context.Attacker = CurrentAction.Attacker;
+	Context.Attacker = IsValid(ExecutionSource) ? ExecutionSource : CurrentAction.Attacker.Get();
 	Context.Card = CurrentExecutionCard;
 	Context.ExecutionMode = BattleSimulationWorld::UsesSimulationRuntime(GridWorldType)? EBattleExecutionMode::Simulation : EBattleExecutionMode::ActualBattle;
 	Context.TargetingResult = ActionTargetingResult;
 	Context.BattleGridManager = GridManager;
 	Context.GridWorldType = GridWorldType;
+	Context.PresentationCharacters = PresentationCharacters;
 
 	ActiveExecutionRunners.Add(Runner);
 
@@ -234,11 +257,35 @@ void UBattleActionExecutor::CompleteAction()
 
 void UBattleActionExecutor::ResetRuntime()
 {
-	UnbindAttackerNotify();
+	UnbindExecutionNotifySources();
 	bRunning = false;
+	RestorePresentationCharacters();
+	PresentationCharacters.Reset();
+	bStopAfterCurrentExecution = false;
 	CurrentAction = FBattleAction();
 	CurrentExecutionCard = nullptr;
 	ActionTargetingResult.Reset();
-	AttackerAnimationComponent = nullptr;
+	NotifyAnimationComponents.Reset();
 	ActiveExecutionRunners.Reset();
+}
+
+void UBattleActionExecutor::RestorePresentationCharacters()
+{
+	if (!PresentationCharacters)
+		return;
+
+	for (const TWeakObjectPtr<ABattleCharacterBase>& Character : *PresentationCharacters)
+	{
+		if (!Character.IsValid())
+			continue;
+
+		UMuksiBattleMovementComponent* MovementComponent = Character->GetBattleMovementComponent();
+		if (!MovementComponent || !MovementComponent->HasSavedPresentationTransform())
+			continue;
+
+		MovementComponent->StopMovement(false);
+		MovementComponent->RestorePresentationTransform(GridManager, true, false);
+	}
+
+	PresentationCharacters->Reset();
 }

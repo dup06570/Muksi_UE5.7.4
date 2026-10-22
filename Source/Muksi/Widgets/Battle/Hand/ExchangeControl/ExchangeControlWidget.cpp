@@ -9,8 +9,6 @@
 void UExchangeControlWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-	
-	BattleTimerWidget->HideTimer();
 }
 
 
@@ -30,6 +28,25 @@ void UExchangeControlWidget::NativeTick(const FGeometry& Geometry, float TimeDel
 
 void UExchangeControlWidget::StartExchangeTimer()
 {
+	
+	ExchangeRemainingTime = ExchangeTotalDuration;
+
+	bExchangeTimerActive = true;
+	bWarningStarted = false;
+
+	if (BattleTimerWidget)
+	{
+		BattleTimerWidget->ShowTimer(ExchangeTotalDuration);
+	}
+}
+
+void UExchangeControlWidget::StartExchangeTimer(int32 ExchangeIndex)
+{
+	if (ExchangeDurationCurve)
+	{
+		ExchangeTotalDuration =ExchangeDurationCurve->GetFloatValue(static_cast<float>(ExchangeIndex));
+	}
+
 	ExchangeRemainingTime = ExchangeTotalDuration;
 
 	bExchangeTimerActive = true;
@@ -46,11 +63,7 @@ void UExchangeControlWidget::StopExchangeTimer()
 	bExchangeTimerActive = false;
 	bWarningStarted = false;
 	ExchangeRemainingTime = 0.0f;
-
-	if (BattleTimerWidget)
-	{
-		BattleTimerWidget->HideTimer();
-	}
+	
 }
 
 void UExchangeControlWidget::UpdateExchangeTimer(float DeltaTime)

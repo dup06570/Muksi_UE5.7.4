@@ -1,7 +1,5 @@
 #include "Muksi/Contents/Battle/Data/MuksiBattleCardDataAsset.h"
 
-#include "Muksi/Contents/Battle/Card/Effect/BattleCardEffect.h"
-
 UMuksiBattleCardDataAsset::UMuksiBattleCardDataAsset()
 {
 	CardID = NAME_None;
@@ -10,15 +8,21 @@ UMuksiBattleCardDataAsset::UMuksiBattleCardDataAsset()
 	CardTexture = nullptr;
 }
 
+/*UMuksiBattleCardDataAsset* UMuksiBattleCardDataAsset::GetActualCard() const
+{
+	if (!bIsDeceiveCard || !IsValid(ActualCard) || ActualCard.Get() == this)
+		return nullptr;
+
+	return ActualCard.Get();
+}*/
+
 UMuksiBattleCardDataAsset* UMuksiBattleCardDataAsset::GetDeceivedCard() const
 {
 	if (!bIsDeceiveCard || !IsValid(DeceivedCard) || DeceivedCard.Get() == this)
-	{
 		return nullptr;
-	}
-
 	return DeceivedCard.Get();
 }
+
 
 #if WITH_EDITOR
 

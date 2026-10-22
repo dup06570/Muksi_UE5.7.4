@@ -18,8 +18,10 @@ class UTargetingPresentationController;
 
 struct FHitResult;
 struct FTargetingIntent;
+struct FEnemySkillSelectResult;
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnEnemyCardSelectionReady, UMuksiBattleCardDataAsset*, int32);
+DECLARE_MULTICAST_DELEGATE(FOnPlayerTargetingCancelled);
 
 /**
  * Exchange 카드 선택, Targeting Session과 카드 공개 Preview를 담당한다.
@@ -37,6 +39,7 @@ public:
     // Widget command API. UI는 선택 요청과 UI 완료만 전달한다.
     bool RequestPlayerCardSelection(UMuksiBattleCardDataAsset* CardData);
     bool RequestPlayerPanicTargeting(UMuksiBattleCardDataAsset* PanicCard);
+    bool RequestPlayerSkillSelection(const FGuid& SkillInstanceId, UMuksiBattleCardDataAsset* SkillData);
     bool RequestEnemyCardSelection();
     bool RequestEnemyPanicTargeting(UMuksiBattleCardDataAsset* PanicCard);
     void CancelPendingEnemyCardSelection();
@@ -52,6 +55,8 @@ public:
     UTargetingPresentationController* GetPresentationController() const { return TargetingPresentationController.Get(); }
 
     FOnEnemyCardSelectionReady OnEnemyCardSelectionReady;
+    FOnPlayerTargetingCancelled OnPlayerTargetingCancelled;
+
 
 protected:
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -72,8 +77,9 @@ private:
     void ClearAllTargeting();
     bool StartPlayerTargeting();
     bool CompletePlayerTargeting();
-    bool CompleteEnemyTargeting(UMuksiBattleCardDataAsset*& OutSelectedCard, FTargetingIntent& OutIntent);
-    bool CompleteEnemyTargetingSession(UMuksiBattleCardDataAsset* SelectedCard, ABattleCharacterBase* TargetCharacter);
+    bool CompleteEnemyTargeting(const FEnemySkillSelectResult& SkillResult, UMuksiBattleCardDataAsset*& OutSelectedSkill, FGuid& OutSkillInstanceId, FTargetingIntent& OutIntent);
+    bool CompleteEnemyTargetingSession(UMuksiBattleCardDataAsset* SelectedCard, const FEnemySkillSelectResult& SkillResult);
+    void FinishEnemyCardSelectionDecision(const FEnemySkillSelectResult& SkillResult);
     void CompleteEnemyCardSelectionRequest();
     void TryCompleteTargetingPhase();
 
@@ -122,4 +128,5 @@ private:
     FTimerHandle EnemyCardSelectionTimerHandle;
     FTimerHandle CardRevealPreviewTimerHandle;
 
+    FGuid PlayerTargetingSkillInstanceId;
 };

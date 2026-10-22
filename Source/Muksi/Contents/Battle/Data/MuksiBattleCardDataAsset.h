@@ -4,22 +4,19 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "StructUtils/InstancedStruct.h"
+#include "MuksiBattleCardDisplayData.h"
 
-#include "MuksiBattleCardEffectData.h"
+#include "MuksiBattleCardType.h"
 #include "Muksi/Contents/Battle/Execution/Data/BattleExecutionTypes.h"
 #include "Muksi/Contents/Battle/Targeting/CardData/TargetingCardData.h"
 
 #include "MuksiBattleCardDataAsset.generated.h"
 
-enum class EBattleCardEffectTrigger : uint8;
-struct FBattleCardEffectContext;
-struct FBattleDamageContext;
 class UTexture2D;
-class UBattleCardEffect;
 class UPanicStrategyBase;
+class UBattleActionRuntimeModifier;
 
-UCLASS()
+UCLASS(PrioritizeCategories = ("CardData", "Battle"))
 class MUKSI_API UMuksiBattleCardDataAsset : public UPrimaryDataAsset
 {
 	GENERATED_BODY()
@@ -35,24 +32,44 @@ public:
 
 public:
 	// 카드 내부 식별용 이름.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Card Data")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData")
 	FName CardID = NAME_None;
 
 	// 카드 표시 이름.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Card Data")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData")
 	FText CardName;
 
 	// 카드 설명.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Card Data", meta = (MultiLine = true))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData", meta = (MultiLine = true))
 	FText CardDescription;
 
 	// 카드 이미지.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Card Data")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData")
 	TObjectPtr<UTexture2D> CardTexture = nullptr;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData")
+	TObjectPtr<UTexture2D> CardIcon = nullptr;
 
 	// 카드 행동 순서 결정에 사용하는 속도.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Card Data")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData")
+	int Cost = 0;
+
+	// 카드 행동 순서 결정에 사용하는 속도.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData")
 	float CardSpeed = 1.0f;
+
+	// 카드 행동 순서 결정에 사용하는 속도.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData")
+	int Cooldown = 0;
+
+	UPROPERTY(EditAnywhere,BlueprintReadOnly,Category = "CardData")
+	FBattleCardTypeInfoData CardTypeInfo;
+
+	//카드 발동 효과 묘사
+public:
+	//카드 발동 효과 정보 <- 여기에 다 적힐 예정
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "CardData|DisplayData")
+	TArray<FCardEffectDisplayData> EffectDisplayData;
 
 	// 카드 시작 시 순서대로 실행할 Main BattleExecutionEntry 목록.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Execution")
@@ -62,27 +79,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Execution")
 	TArray<FBattleExecutionNotify> ExecutionNotifies;
 
+	// BattleAction 실행 직전에 카드 고유의 런타임 Execution 구성을 편집한다.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Execution")
+	TSubclassOf<UBattleActionRuntimeModifier> RuntimeModifierClass;
+
 	// Selection / Resolve / Presentation으로 구성되는 카드 Targeting 설정.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Targeting", meta = (DisplayName = "Targeting"))
 	FTargetingCardData TargetingData;
 
-	// 변초 카드는 Targeting은 원본을 유지하고 Simulation Execution만 DeceivedCard를 사용한다.
+	// 기만 카드는 자신의 CardData / Targeting / Execution을 표시 정보로 사용하고, 실제 전투에서는 DeceivedCard의 Execution을 사용한다.
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Deceive")
 	bool bIsDeceiveCard = false;
-
+	
+	
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Battle|Deceive", meta = (EditCondition = "bIsDeceiveCard"))
 	TObjectPtr<UMuksiBattleCardDataAsset> DeceivedCard = nullptr;
 
 	UFUNCTION(BlueprintPure, Category = "Battle|Deceive")
 	UMuksiBattleCardDataAsset* GetDeceivedCard() const;
 
-	UPROPERTY(EditAnywhere,BlueprintReadOnly,Category = "Card|Type")
-	FBattleCardTypeInfoData CardTypeInfo;
-
-	//카드 발동 효과 묘사
-public:
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Card Effect")
-	TArray<FText> CardEffectsDescription;
 	
 public:
 	// 패닉 상황에서 이 카드를 자동으로 사용할 때의 좌표 선택 방식.

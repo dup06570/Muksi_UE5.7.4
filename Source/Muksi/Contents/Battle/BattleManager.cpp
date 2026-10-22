@@ -3,6 +3,8 @@
 #include "Muksi/Contents/MuksiWorldManagerSubsystem.h"
 #include "Muksi/Contents/Battle/Flow/BattlePhasePipeline.h"
 #include "Muksi/Contents/Battle/Character/BattleCharacterBase.h"
+#include "Muksi/Contents/Battle/Animations/MuksiBattleAnimInstance.h"
+#include "Muksi/Contents/Battle/Animations/MuksiBattleAnimationComponent.h"
 #include "Muksi/Contents/Battle/Data/BattleAction.h"
 #include "Muksi/Contents/Battle/Data/MuksiBattleCardDataAsset.h"
 #include "Muksi/Contents/Battle/Grid/BattleGridManager.h"
@@ -10,9 +12,13 @@
 #include "Muksi/Contents/Battle/Sequence/BattleSequenceManager.h"
 #include "Muksi/Contents/Battle/Setup/BattleSetupManager.h"
 #include "Muksi/Contents/Battle/Simulation/BattleSimulationManager.h"
+#include "Muksi/Contents/Battle/StatusEffect/MuksiStatusEffectRegistry.h"
+#include "Muksi/Contents/Battle/Camera/BattleCameraManager.h"
+#include "Muksi/Contents/Battle/StatusEffect/StatusEffectRegistryDataAsset.h"
 #include "Muksi/Contents/Battle/Targeting/BattleTargetingManager.h"
 #include "Muksi/Widgets/Battle/Hand/Card/BattleCardManager.h"
-#include "Muksi/Save/BattleEncounterSubsystem.h"
+#include "Muksi/Contents/Battle/Encounter/BattleEncounterSubsystem.h"
+#include "Kismet/GameplayStatics.h"
 
 ABattleManager::ABattleManager()
 {
@@ -36,19 +42,33 @@ void ABattleManager::BeginPlay()
     
     BattleCardManager = NewObject<UBattleCardManager>(this);
 
-    if (UMuksiWorldManagerSubsystem* ManagerSubsystem = UMuksiWorldManagerSubsystem::Get(this)) 
+    StatusEffectRegistry = NewObject<UMuksiStatusEffectRegistry>(this);
+    if (!StatusEffectRegistry || !StatusEffectRegistry->Initialize(StatusEffectRegistryDataAsset))
+    {
+        UE_LOG(LogTemp, Error, TEXT("[BattleManager] Failed to initialize StatusEffectRegistry."));
+        StatusEffectRegistry = nullptr;
+    }
+
+    if (UMuksiWorldManagerSubsystem* ManagerSubsystem = UMuksiWorldManagerSubsystem::Get(this))
         ManagerSubsystem->RegisterManager<ABattleManager>(this);
 }
 
 void ABattleManager::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    GetWorldTimerManager().ClearTimer(DeathHitSlowMotionTimerHandle);
+    GetWorldTimerManager().ClearTimer(DeathBattleEndTimerHandle);
+    UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
     if (PhasePipeline) 
         PhasePipeline->Shutdown();
 
     PhasePipeline = nullptr;
     BattleRuntimeContext = nullptr;
+    BattleCardManager = nullptr;
+    StatusEffectRegistry = nullptr;
     bBattleFlowInitialized = false;
     bBattleFlowStarted = false;
+    DeadBattleCharacter.Reset();
+    bBattleEndRequested = false;
 
     if (UMuksiWorldManagerSubsystem* ManagerSubsystem = UMuksiWorldManagerSubsystem::Get(this)) 
         ManagerSubsystem->UnregisterManager<ABattleManager>(this);
@@ -64,7 +84,20 @@ bool ABattleManager::InitializeBattleFlow()
     if (!IsValid(BattleRuntimeContext) || !IsValid(PhasePipeline))
         return false;
 
-    if (!IsValid(BattleSetupManager) || !IsValid(BattleGridManager) || !IsValid(BattleTargetingManager) || !IsValid(BattleSimulationManager) || !IsValid(BattleSequenceManager))
+    if (!IsValid(StatusEffectRegistry))
+    {
+        UE_LOG(LogTemp, Error, TEXT("[BattleManager] StatusEffectRegistry is unavailable."));
+        return false;
+    }
+
+    if (!IsValid(BattleSetupManager) || 
+        !IsValid(BattleGridManager) || 
+        !IsValid(BattleTargetingManager) || 
+        !IsValid(BattleSimulationManager) || 
+        !IsValid(BattleSequenceManager) ||
+        !IsValid(BattleCardManager) ||
+        !IsValid(BattleCameraManager)
+        )
     {
         UE_LOG(LogTemp, Error, TEXT("[BattleManager] Required manager reference is missing. Setup=%s Grid=%s Targeting=%s Simulation=%s Sequence=%s"), *GetNameSafe(BattleSetupManager), *GetNameSafe(BattleGridManager), *GetNameSafe(BattleTargetingManager), *GetNameSafe(BattleSimulationManager), *GetNameSafe(BattleSequenceManager));
         return false;
@@ -84,6 +117,11 @@ bool ABattleManager::InitializeBattleFlow()
     
     if (!BattleCardManager->InitializeBattleFlow(this))
         return false;
+    
+    if (!BattleCameraManager->InitializeBattleFlow(this))
+    {
+        return false;
+    }
 
     bBattleFlowInitialized = true;
     return true;
@@ -93,9 +131,7 @@ bool ABattleManager::InitializeBattleFlow()
 bool ABattleManager::SubmitTargetingAction(ABattleCharacterBase* Attacker, UMuksiBattleCardDataAsset* Card, const FTargetingIntent& TargetingIntent, bool bPlayerAction)
 {
     if (!IsValid(BattleRuntimeContext) || !IsValid(Attacker) || !IsValid(Card))
-    {
         return false;
-    }
 
     if (CurrentExchange < 0 || CurrentExchange >= MaxExchangeCount)
     {
@@ -105,20 +141,24 @@ bool ABattleManager::SubmitTargetingAction(ABattleCharacterBase* Attacker, UMuks
 
     FBattleAction BattleAction;
     BattleAction.ExchangeIndex = CurrentExchange;
-    BattleAction.Card = Card;
-    BattleAction.Speed = Attacker->GetCharacterSpeed() + Card->CardSpeed;
     BattleAction.Attacker = Attacker;
+    BattleAction.Card = Card;
+    BattleAction.CardSpeed = Card->CardSpeed;
+    BattleAction.CharacterSpeed = Attacker->GetCharacterSpeed();
     BattleAction.bPlayerAction = bPlayerAction;
     BattleAction.TargetingIntent = TargetingIntent;
 
+    UMuksiBattleCardDataAsset* ExecutionCard = Card;
+    /*if (!IsValid(ExecutionCard))
+        ExecutionCard = Card;*/
+
+    BattleAction.ExecutionEntries = ExecutionCard->MainExecutionEntries;
+    BattleAction.ExecutionNotifies = ExecutionCard->ExecutionNotifies;
+
     if (bPlayerAction)
-    {
         BattleRuntimeContext->SetPlayerExchangeAction(CurrentExchange, BattleAction);
-    }
     else
-    {
         BattleRuntimeContext->SetEnemyExchangeAction(CurrentExchange, BattleAction);
-    }
 
     return true;
 }
@@ -140,7 +180,8 @@ void ABattleManager::StartBattleFlow()
 
 void ABattleManager::ReadyStart()
 {
-    bIsCharacterDead = false;
+    bBattleEndRequested = false;
+    DeadBattleCharacter.Reset();
     ChangePhase(EBattlePhase::ReadyStart);
 }
 
@@ -295,10 +336,72 @@ bool ABattleManager::IsCurrentPhaseCompletion(EBattlePhase FinishedPhase, const 
     return false;
 }
 
-void ABattleManager::NotifyBattleCharacterDead()
+void ABattleManager::NotifyBattleCharacterDead(ABattleCharacterBase* DeadCharacter)
 {
-    if (bIsCharacterDead) return;
-    bIsCharacterDead = true;
+    if (bBattleEndRequested || !IsValid(DeadCharacter))
+        return;
+
+    PrepareBattleEnd();
+    StartDeathHitSlowMotion(DeadCharacter);
+}
+
+void ABattleManager::RequestBattleEnd()
+{
+    if (bBattleEndRequested)
+        return;
+
+    PrepareBattleEnd();
+    BattleEnd();
+}
+
+void ABattleManager::PrepareBattleEnd()
+{
+    bBattleEndRequested = true;
+
+    if (BattleRuntimeContext)
+        BattleRuntimeContext->ClearBattleActionSequenceQueue();
+
+    if (BattleSequenceManager)
+        BattleSequenceManager->StopAfterCurrentExecution();
+}
+
+void ABattleManager::StartDeathHitSlowMotion(ABattleCharacterBase* DeadCharacter)
+{
+    DeadBattleCharacter = DeadCharacter;
+
+    const float TimeDilation = FMath::Max(0.01f, DeathHitSlowMotionTimeDilation);
+    UGameplayStatics::SetGlobalTimeDilation(this, TimeDilation);
+
+    const float TimerDuration = FMath::Max(KINDA_SMALL_NUMBER, DeathHitSlowMotionDuration * TimeDilation);
+    GetWorldTimerManager().SetTimer(DeathHitSlowMotionTimerHandle, this, &ABattleManager::FinishDeathHitSlowMotion, TimerDuration, false);
+}
+
+void ABattleManager::FinishDeathHitSlowMotion()
+{
+    UGameplayStatics::SetGlobalTimeDilation(this, 1.0f);
+
+    if (ABattleCharacterBase* DeadCharacter = DeadBattleCharacter.Get())
+    {
+        if (UMuksiBattleAnimationComponent* AnimationComponent = DeadCharacter->FindComponentByClass<UMuksiBattleAnimationComponent>())
+        {
+            AnimationComponent->StopCurrentMontage(DeathMontageBlendOutTime);
+            AnimationComponent->SetCharacterState(EMuksiBattleCharacterState::Die);
+        }
+    }
+
+    DeadBattleCharacter.Reset();
+
+    if (DeathBattleEndDelay <= 0.0f)
+    {
+        BattleEnd();
+        return;
+    }
+
+    GetWorldTimerManager().SetTimer(DeathBattleEndTimerHandle, this, &ABattleManager::FinishDeathBattleEndDelay, DeathBattleEndDelay, false);
+}
+
+void ABattleManager::FinishDeathBattleEndDelay()
+{
     BattleEnd();
 }
 
@@ -313,7 +416,7 @@ void ABattleManager::EndBattleLevel()
 
 bool ABattleManager::ShouldEndBattle() const
 {
-    return bIsCharacterDead;
+    return bBattleEndRequested;
 }
 
 void ABattleManager::AdvanceExchange()

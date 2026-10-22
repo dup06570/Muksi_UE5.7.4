@@ -2,14 +2,14 @@
 
 #include "CoreMinimal.h"
 #include "Muksi/Contents/Battle/Execution/Data/BattleExecutionTypes.h"
+#include "Muksi/Contents/Battle/Execution/Executions/Damage/Modifier/DamageModifier.h"
 #include "DamageExecutionData.generated.h"
 
 UENUM(BlueprintType)
-enum class EDamageExecutionTargetPolicy : uint8
+enum class EDamageDefensePolicy : uint8
 {
-	TargetingResult,
-	ExecutionTarget,
-	Attacker
+	ApplyDefense,
+	IgnoreDefense
 };
 
 USTRUCT(BlueprintType)
@@ -18,13 +18,25 @@ struct FDamageExecutionData : public FBattleExecutionData
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage")
-	EDamageExecutionTargetPolicy TargetPolicy = EDamageExecutionTargetPolicy::TargetingResult;
+	EBattleExecutionTargetPolicy TargetPolicy = EBattleExecutionTargetPolicy::TargetingResult;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage", meta = (ClampMin = "0"))
 	int32 DamageValue = 0;
 
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category = "Damage")
+	TArray<TObjectPtr<UMuksiDamageModifier>> DamageModifiers;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage")
+	EDamageDefensePolicy DefensePolicy = EDamageDefensePolicy::ApplyDefense;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage")
 	bool bTriggerHitReaction = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "FX")
+	FName HitFXDataAssetKey = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Presentation")
+	FName FloatingTextStyleKey = TEXT("Damage");
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Damage")
 	bool bTriggerStatusEffectReactions = true;

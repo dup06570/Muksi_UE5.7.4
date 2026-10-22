@@ -1,10 +1,12 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "BattleStatComponent.generated.h"
+
+class ABattleCharacterBase;
 
 USTRUCT(BlueprintType)
 struct MUKSI_API FBattleStats
@@ -27,16 +29,22 @@ public:
 	// 속도
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle Stat")
 	float Speed = 10.0f;
+	
+	//스킬 선택 속도
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle Stat")
+	FVector2D SelectSpeed = FVector2D(1.f, 1.f);
 };
 
 //현재 HP의 변화를 감지해야 하는 UI/BattleManager 등등에서 감지하기 위한 델리게이트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnBattleHPChanged,
-	float, CurrentHP,
-	float, MaxHP
+	float, PreviousHP,
+	float, CurrentHP
 );
 
 
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnBattleHPChangeApplied, float, AppliedHPChange, FName, StyleKey, ABattleCharacterBase*, TargetCharacter);
 
 //죽은 거 감지하기 위한 델리게이트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBattleCharacterDead, ABattleCharacterBase*, DeadCharacter);
@@ -83,6 +91,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Battle Stat")
 	float Heal(float HealAmount);
 
+	// 전투 중 체력 변화. 양수는 회복, 음수는 피해. 실제 적용량을 반환한다.
+	UFUNCTION(BlueprintCallable, Category = "Battle Stat")
+	float ApplyHPChange(float HPDelta, FName StyleKey = NAME_None);
+
 	// 현재 체력 설정
 	UFUNCTION(BlueprintCallable, Category = "Battle Stat")
 	void SetCurrentHP(float NewHP);
@@ -95,6 +107,7 @@ public:
 	//현재 캐릭터 스피드 설정
 	UFUNCTION(BlueprintCallable, Category = "Battle Stat")
 	void SetCurrentSpeed(float NewSpeed);
+	void ModifyCurrentSpeed(float Delta);
 	
 
 	// 사망 여부
@@ -138,11 +151,21 @@ public:
 	{
 		return CurrentStats.Speed;
 	}
+	
+	//스킬 선택 속도
+	UFUNCTION(BlueprintPure, Category = "Battle Stat")
+	FVector2D GetSelectSpeed()const
+	{
+		return CurrentStats.SelectSpeed;
+	}
 
 public:
 	// 체력이 변경됐을 때 호출
 	UPROPERTY(BlueprintAssignable, Category = "Battle Stat|Event")
 	FOnBattleHPChanged OnHPChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Battle Stat|Event")
+	FOnBattleHPChangeApplied OnHPChangeApplied;
 
 
 	// 체력이 0이 되어 사망했을 때 호출

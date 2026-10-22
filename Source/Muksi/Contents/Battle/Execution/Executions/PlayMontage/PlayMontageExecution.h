@@ -4,7 +4,9 @@
 #include "Muksi/Contents/Battle/Execution/Core/BattleExecution.h"
 #include "PlayMontageExecution.generated.h"
 
+class UAnimMontage;
 class UMuksiBattleAnimationComponent;
+class UMuksiBattleFXComponent;
 
 UCLASS(Blueprintable, EditInlineNew, DefaultToInstanced)
 class MUKSI_API UPlayMontageExecution : public UBattleExecution
@@ -17,13 +19,19 @@ public:
 
 private:
 	UFUNCTION()
-	void HandleMontageFinished(bool bInterrupted);
+	void HandleMontageFinished(UAnimMontage* Montage, bool bInterrupted);
 
 	void FinishPlayMontage();
 
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMuksiBattleAnimationComponent> AnimationComponent = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> PlayingMontage = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMuksiBattleFXComponent> BattleFXComponent = nullptr;
 
 	FBattleExecutionFinished CachedOnFinished;
 };

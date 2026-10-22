@@ -6,24 +6,27 @@
 #include "Muksi/Contents/Battle/Hex/HexOffsetCoord.h"
 #include "GameFramework/Actor.h"
 #include "Muksi/Contents/Battle/Camera/BattleCameraManager.h"
+#include "Muksi/Contents/Battle/Data/BattleCharacterInitData.h"
 #include "Muksi/Contents/Battle/Data/MuksiCharacterDataAsset.h"
 #include "Muksi/Contents/Battle/Interfaces/SelectableCharacterInterface.h"
 #include "BattleCharacterBase.generated.h"
 
+class UBattleSkillComponent;
 class UCharacterCameraComponent;
 class ABattleManager;
 class AExchangeCharacterBase;
 class UBoxComponent;
+class USkeletalMeshComponent;
 class UMuksiBattleAnimationComponent;
 class UMuksiBattleCardDataAsset;
 class UMuksiBattleMovementComponent;
+class UMuksiBattleFXComponent;
 class UMuksiStatusEffectComponent;
 class UCharacterPassiveComponent;
 class UBattleStatComponent;
-class UBattleCardComponent;
 
 //여기 적혀있는거 고쳐야 함
-USTRUCT(BlueprintType)
+/*USTRUCT(BlueprintType)
 struct MUKSI_API FCharacterData
 {
 	GENERATED_BODY()
@@ -51,7 +54,7 @@ struct MUKSI_API FCharacterData
 	TObjectPtr<UMuksiCharacterDataAsset> CharacterAsset = nullptr;
 
 	UPROPERTY(Transient)
-	int32 MaxHP = 0;
+	float MaxHP = 0.f;
 	
 	UPROPERTY(Transient)
 	float AttackValue = 0.f;
@@ -64,7 +67,7 @@ struct MUKSI_API FCharacterData
 	
 	UPROPERTY(Transient)
 	TArray<TSubclassOf<UCharacterPassive>> CharacterPassives;
-};
+};*/
 
 
 UCLASS()
@@ -76,6 +79,8 @@ public:
 	ABattleCharacterBase();
 
 public:
+	void InitializeCharacter(const FBattleCharacterInitData& InitData, ABattleManager* BattleManager);
+	
 	float GetCurrentHP() const;
 	void SetCurrentHP(float NewHP);
 	
@@ -85,11 +90,9 @@ public:
 
 	virtual void SetCharacterData(UMuksiCharacterDataAsset* InCharacterData, ABattleManager* BattleManager);
 	
-	UMuksiCharacterDataAsset* GetCharacterData()const{return CharacterData.CharacterAsset;};
-	
-	FHexOffsetCoord GetCharacterCoord()const{return CharacterData.CurrentPosition;};
+	FHexOffsetCoord GetCharacterCoord()const{return CurrentPosition;};
 	virtual FName GetTargetingCharacterKey() const { return GetFName(); }
-	void SetCharacterPosition(FHexOffsetCoord NewPosition){CharacterData.CurrentPosition = NewPosition;};
+	void SetCharacterPosition(FHexOffsetCoord NewPosition){CurrentPosition = NewPosition;};
 	
 	int32 GetCurrentBattleCardCount()const;
 	
@@ -101,27 +104,30 @@ public:
 	}
 	
 public:
-	UFUNCTION(
-		BlueprintPure,
-		Category = "Battle Character|Camera"
-	)
+	UFUNCTION(BlueprintPure, Category = "Battle Character|Camera")
 	FTransform GetCameraFocusTransform() const;
 	
-	
-	
+	const FBattleCharacterInfo& GetCharacterInfo() const{ return CharacterInfo; }
+	const TArray<FCharacterPanicData>& GetTimeoutPenalties() const{ return TimeoutPenalties; }
 protected:
-	void InitializeBattleStats();
 	void CopySimulationStateFrom(const ABattleCharacterBase& SourceCharacter);
 
-	FCharacterData CharacterData;
+	/*UPROPERTY(Transient)
+	FCharacterData CharacterData;*/
 	
 public:
 	
 	UFUNCTION(BlueprintPure, Category = "BattleCharacter|Mesh")
 	USkeletalMeshComponent* GetMeshComponent() const { return MeshComponent; }
 
+	UFUNCTION(BlueprintPure, Category = "BattleCharacter|Mesh")
+	USkeletalMeshComponent* GetBattleSkeletalMesh() const { return MeshComponent; }
+
 	UFUNCTION(BlueprintPure, Category = "BattleCharacter|Movement")
 	UMuksiBattleMovementComponent* GetBattleMovementComponent() const { return BattleMovementComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "BattleCharacter|FX")
+	UMuksiBattleFXComponent* GetBattleFXComponent() const { return BattleFXComponent; }
 
 	UFUNCTION(BlueprintPure, Category = "BattleCharacter|StatusEffect")
 	UMuksiStatusEffectComponent* GetStatusEffectComponent() const { return StatusEffectComponent; }
@@ -130,14 +136,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "BattleCharacter|Stat")
 	UBattleStatComponent* GetBattleStatComponent() const { return BattleStatComponent; }
 	
-	UFUNCTION(BlueprintPure, Category = "BattleCharacter|CameraFocus")
-	UCharacterCameraComponent* GetClickCameraFocusComponent() const{ return ClickCameraFocusComponent;}
 	
-	UFUNCTION(BlueprintPure, Category = "BattleCharacter|CameraFocus")
-	UCharacterCameraComponent* GetAttackCameraComponent()const{ return AttackCameraFocusComponent;}
 	
-	UFUNCTION(BlueprintPure, Category = "BattleCharacter|BattleCard")
-	UBattleCardComponent* GetBattleCardComponent(){ return BattleCardComponent; }
+	
+	UFUNCTION(BlueprintPure, Category = "BattleCharacter|BattleSkill")
+	UBattleSkillComponent* GetBattleSkillComponent()const {return BattleSkillComponent;}
 
 
 	virtual void OnSelected() override;
@@ -157,6 +160,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UBoxComponent> ClickCollision = nullptr;
 
+	UPROPERTY(Transient)
+	TArray<FCharacterPanicData> TimeoutPenalties;
+	
+	UPROPERTY(Transient)
+	FBattleCharacterInfo CharacterInfo;
+	
+	// 전투 그리드에서 사용하는 현재 좌표.
+	UPROPERTY(Transient)
+	FHexOffsetCoord CurrentPosition;
 
 public:
 	//Component
@@ -168,19 +180,45 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMuksiBattleMovementComponent> BattleMovementComponent = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMuksiBattleFXComponent> BattleFXComponent = nullptr;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UBattleStatComponent> BattleStatComponent = nullptr;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Passive", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCharacterPassiveComponent> PassiveComponent;
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UBattleSkillComponent> BattleSkillComponent;
+	
+	
+	//카메라 연출 Focus---------------------------------------------------------------------------------------------------
+public:
+	UFUNCTION(BlueprintPure, Category = "BattleCharacter|CameraFocus")
+	UCharacterCameraComponent* GetActionCameraFocusComponent() const { return ActionCameraFocusComponent; }
+	
+	UFUNCTION(BlueprintPure, Category = "BattleCharacter|CameraFocus")
+	UCharacterCameraComponent* GetClickCameraFocusComponent() const{ return ClickCameraFocusComponent;}
+	
+	UFUNCTION(BlueprintPure, Category = "BattleCharacter|CameraFocus")
+	UCharacterCameraComponent* GetAttackCameraComponent()const{ return AttackCameraFocusComponent;}
+	
+	USceneComponent* GetSkillInfoAnchorComponent() const{ return SkillInfoAnchorComponent; }
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCharacterCameraComponent> ClickCameraFocusComponent = nullptr;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCharacterCameraComponent> AttackCameraFocusComponent = nullptr;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Passive", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UCharacterPassiveComponent> PassiveComponent;
 	
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UBattleCardComponent> BattleCardComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle|Camera", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCharacterCameraComponent> ActionCameraFocusComponent = nullptr;
+	
+	//스킬 위젯 액터 소환 위치
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle|Camera", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USceneComponent> SkillInfoAnchorComponent = nullptr;
+	
+	//------------------------------------------------------------------------------------------------------------------
 };

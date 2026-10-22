@@ -55,6 +55,8 @@ struct FBattleExecutionContext
 	// BattleExecution 실행 중 추가 ExecutionEntries를 별도 BattleExecutionRunner로 실행하도록 요청하는 통로이다.
 	FRequestRuntimeExecutionEntries RequestRuntimeExecutionEntries;
 
+	TSharedPtr<TArray<TWeakObjectPtr<ABattleCharacterBase>>> PresentationCharacters;
+
 	bool IsValidContext() const
 	{
 		return Attacker != nullptr;
@@ -71,7 +73,8 @@ struct FBattleExecutionContext
 		const FTargetingStepResult* StepResult = GetLastTargetingStepResult();
 		if (!StepResult) return FHexOffsetCoord::Invalid();
 		if (StepResult->Step.HasTargetCoord()) return StepResult->Step.TargetCoord;
-		return StepResult->AffectedCoords.IsValidIndex(0) ? StepResult->AffectedCoords[0] : FHexOffsetCoord::Invalid();
+		const FTargetingGroup* Group = StepResult->GetPrimaryGroup();
+		return Group && Group->AffectedCoords.IsValidIndex(0) ? Group->AffectedCoords[0] : FHexOffsetCoord::Invalid();
 	}
 
 	bool CanRequestRuntimeExecutionEntries() const

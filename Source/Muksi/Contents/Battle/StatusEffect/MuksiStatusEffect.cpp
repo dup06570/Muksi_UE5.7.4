@@ -3,22 +3,12 @@
 #include "Muksi/Contents/Battle/Execution/Data/BattleExecutionContext.h"
 #include "Muksi/Contents/Battle/Execution/Data/BattleExecutionTypes.h"
 
-void UMuksiStatusEffect::Initialize(AActor* InOwnerActor,FName InEffectID,int32 InStackCount,int32 InDuration)
+void UMuksiStatusEffect::Initialize(AActor* InOwnerActor, FName InEffectID, int32 InStackCount, int32 InDuration)
 {
-    OwnerActor = InOwnerActor;
-
-    EffectID = InEffectID;
-
-    CurrentStack = FMath::Max(1, InStackCount);
-    RemainingDuration = FMath::Max(1, InDuration);
-}
-
-void UMuksiStatusEffect::CopyRuntimeStateFrom(const UMuksiStatusEffect& SourceEffect, AActor* InOwnerActor)
-{
-    OwnerActor = InOwnerActor;
-    EffectID = SourceEffect.EffectID;
-    CurrentStack = SourceEffect.CurrentStack;
-    RemainingDuration = SourceEffect.RemainingDuration;
+	OwnerActor = InOwnerActor;
+	EffectID = InEffectID;
+	CurrentStack = FMath::Max(1, InStackCount);
+	RemainingDuration = FMath::Max(1, InDuration);
 }
 
 void UMuksiStatusEffect::BuildPhaseExecutionEntries(EBattlePhase OldPhase, EBattlePhase NewPhase, TArray<FBattleExecutionEntry>& OutExecutionEntries)
@@ -28,10 +18,20 @@ void UMuksiStatusEffect::BuildPhaseExecutionEntries(EBattlePhase OldPhase, EBatt
 	static_cast<void>(OutExecutionEntries);
 }
 
-void UMuksiStatusEffect::BuildBattleActionStartExecutionEntries(const FBattleAction& BattleAction, TArray<FBattleExecutionEntry>& OutExecutionEntries)
+void UMuksiStatusEffect::EditBattleActions(FBattleAction& CurrentAction, FBattleAction& OpponentAction)
 {
-	static_cast<void>(BattleAction);
-	static_cast<void>(OutExecutionEntries);
+	static_cast<void>(CurrentAction);
+	static_cast<void>(OpponentAction);
+}
+
+void UMuksiStatusEffect::OnBattleActionCompleted(const FBattleAction& CompletedAction)
+{
+	static_cast<void>(CompletedAction);
+}
+
+void UMuksiStatusEffect::OnBattleExchangeCompleted(int32 ExchangeIndex)
+{
+	static_cast<void>(ExchangeIndex);
 }
 
 void UMuksiStatusEffect::BuildHitDealtExecutionEntries(const FBattleExecutionContext& Context, int32 Damage, TArray<FBattleExecutionEntry>& OutExecutionEntries)
@@ -56,6 +56,12 @@ void UMuksiStatusEffect::OnRemoved()
 {
 }
 
+void UMuksiStatusEffect::OnStackChanged(int32 PreviousStack, int32 NewStack)
+{
+	static_cast<void>(PreviousStack);
+	static_cast<void>(NewStack);
+}
+
 void UMuksiStatusEffect::OnReapplied(int32 AddedStack,int32 AddedDuration)
 {
     AddStack(AddedStack);
@@ -70,12 +76,20 @@ bool UMuksiStatusEffect::IsExpired() const
 
 void UMuksiStatusEffect::AddStack(int32 Amount)
 {
-    CurrentStack += Amount;
+	const int32 PreviousStack = CurrentStack;
+	CurrentStack += Amount;
+
+	if (PreviousStack != CurrentStack)
+		OnStackChanged(PreviousStack, CurrentStack);
 }
 
 void UMuksiStatusEffect::ConsumeStack(int32 Amount)
 {
-    CurrentStack = FMath::Max(0, CurrentStack - Amount);
+	const int32 PreviousStack = CurrentStack;
+	CurrentStack = FMath::Max(0, CurrentStack - Amount);
+
+	if (PreviousStack != CurrentStack)
+		OnStackChanged(PreviousStack, CurrentStack);
 }
 
 void UMuksiStatusEffect::ConsumeDuration(int32 Amount)
