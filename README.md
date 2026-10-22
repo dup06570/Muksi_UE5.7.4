@@ -838,6 +838,20 @@ Viewport 크기는 DPI Scale을 반영하여 UI 좌표에 맞춥니다.
 이를 통해 화면 오른쪽이나 아래쪽에 있는 키워드에서도
 팝업이 화면 안쪽 방향으로 표시되도록 구성했습니다.
 
+#### 결과
+
+<p align="center">
+  <img src="./page_image/SkillPassivePopup.gif"
+       alt="Character 정보 패널 Popup"
+       width="800"/>
+</p>
+
+<p align="center">
+  <img src="./page_image/StatusEffectPopup.gif"
+       alt="Status Effect Popup"
+       width="800"/>
+</p>
+
 #### 관련 코드
 
 - `Source/Muksi/Widgets/Battle/StatPanel/CardInfo/EffectRichTextBlock.cpp`
