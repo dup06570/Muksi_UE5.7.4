@@ -694,6 +694,14 @@ Dynamic Material의 `Dissolve` 값을 시간에 따라 변경하고,
 슬롯 공개와 변초 공개는 별도 흐름으로 처리하여,
 선택한 스킬을 보여주는 시점과 실제 변초 정보를 공개하는 시점을 구분했습니다.
 
+#### 결과
+
+<p align="center">
+  <img src="./page_image/변초디졸브.gif"
+       alt="변초 스킬의 실제 정보 공개 및 디졸브 연출"
+       width="800"/>
+</p>
+
 #### 관련 코드
 
 - `Source/Muksi/Private/Widgets/Battle/Widget_BattleMainScreen.cpp`
